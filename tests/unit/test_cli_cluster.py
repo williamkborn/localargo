@@ -3,11 +3,12 @@
 # SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+import base64
 from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from localargo.cli.commands.cluster import delete, init, status
+from localargo.cli.commands.cluster import delete, init, password, status
 
 
 class TestCLICluster:
@@ -116,3 +117,36 @@ class TestCLICluster:
 
         assert result.exit_code == 0
         assert "ArgoCD Status" in result.output
+
+    def test_password_command_success(self):
+        """Test password command with successful password retrieval."""
+
+        runner = CliRunner()
+
+        # Mock the subprocess call to return a fake base64 encoded password
+        fake_password = "fake-password"
+        fake_b64_password = base64.b64encode(fake_password.encode()).decode()
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value.stdout = fake_b64_password
+            mock_run.return_value.stderr = ""
+
+            result = runner.invoke(password, ["test-cluster"])
+
+        assert result.exit_code == 0
+        # The command should run successfully without errors
+
+    def test_password_command_failure(self):
+        """Test password command when kubectl fails."""
+        import subprocess
+
+        runner = CliRunner()
+
+        # Mock subprocess.run to simulate a kubectl failure
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(1, "kubectl", "NotFound")
+
+            result = runner.invoke(password, ["nonexistent-cluster"])
+
+        # The command should exit with an error code
+        assert result.exit_code != 0

@@ -8,6 +8,7 @@ This module provides commands for managing Kubernetes clusters used for ArgoCD d
 
 from __future__ import annotations
 
+import base64
 import subprocess
 
 import rich_click as click
@@ -187,3 +188,60 @@ def delete(name: str, provider: str) -> None:
         error_msg = f"Failed to delete cluster '{name}'"
         logger.error("❌ %s", error_msg)
         raise click.ClickException(error_msg)
+
+
+@cluster.command()
+@click.argument("name")
+@click.option(
+    "--provider",
+    type=click.Choice(["kind", "k3s"]),
+    default="kind",
+    help="Cluster provider",
+)
+def password(name: str, provider: str) -> None:
+    """Get ArgoCD initial admin password for a cluster."""
+    # Check if kubectl is available
+    kubectl_path = ensure_kubectl_available()
+
+    logger.info("Getting ArgoCD password for %s cluster '%s'...", provider, name)
+
+    try:
+        # Switch to the cluster context if needed
+        cluster_manager.switch_context(f"{provider}-{name}")
+
+        # Get the ArgoCD initial admin secret
+        result = subprocess.run(
+            [
+                kubectl_path,
+                "get",
+                "secret",
+                "argocd-initial-admin-secret",
+                "-n",
+                "argocd",
+                "-o",
+                "jsonpath={.data.password}",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        if result.stdout:
+            # Decode the base64 password
+            decoded_password = base64.b64decode(result.stdout.strip()).decode("utf-8")
+            logger.info("🔐 ArgoCD Login Credentials:")
+            logger.info("   Username: admin")
+            logger.info("   Password: %s", decoded_password)
+            logger.info("   URL: https://argocd.localtest.me")
+        else:
+            logger.error("❌ No password found in ArgoCD initial admin secret")
+            logger.info("💡 Make sure ArgoCD is installed and the initial admin secret exists")
+
+    except subprocess.CalledProcessError as e:
+        logger.error("❌ Failed to get ArgoCD password: %s", e)
+        if "NotFound" in e.stderr:
+            logger.info("💡 ArgoCD may not be installed or the cluster may not exist")
+        raise click.ClickException("Failed to retrieve ArgoCD password")
+    except Exception as e:
+        logger.error("❌ Error getting ArgoCD password: %s", e)
+        raise click.ClickException("Failed to retrieve ArgoCD password")
