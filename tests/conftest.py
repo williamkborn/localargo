@@ -3,11 +3,13 @@
 # SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+import json
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
 
+# pylint: disable=too-many-locals, too-many-statements
 @pytest.fixture(autouse=True)
 def mock_subprocess_run():
     """Patch subprocess.run globally to prevent actual shell commands."""
@@ -46,6 +48,9 @@ def mock_subprocess_run():
         if "helm" in tool:
             _handle_helm(cmd, result)
             return
+        if "argocd" in tool:
+            _handle_argocd(cmd, result)
+            return
 
     def _handle_kind(cmd, result):
         if "version" in cmd:
@@ -62,6 +67,17 @@ def mock_subprocess_run():
     def _handle_kubectl(cmd, result):
         if "cluster-info" in cmd:
             result.stdout = "Kubernetes control plane is running"
+            return
+        # Return a small pod list for get pods -o json
+        if "get" in cmd and "pods" in cmd and "-o" in cmd and "json" in cmd:
+            result.stdout = (
+                '{"items": ['
+                '{"metadata": {"name": "app-0", "labels": {"app": "myapp"}}},'
+                '{"metadata": {"name": "app-1", "labels": {"app.kubernetes.io/name": "myapp"}}},'
+                '{"metadata": {"name": "other", "labels": {"app": "other"}}}'
+                "]}"
+            )
+            return
 
     def _handle_helm(cmd, result):
         if "repo" in cmd and "add" in cmd:
@@ -71,6 +87,111 @@ def mock_subprocess_run():
             result.stdout = (
                 "Hang tight while we grab the latest from your chart repositories..."
             )
+
+    def _handle_argocd(cmd, result):
+        # Dispatch through small predicate handlers to keep this function simple
+        for handler in (
+            _argocd_handle_user_info,
+            _argocd_handle_logout,
+            _argocd_handle_login,
+            _argocd_handle_app_list,
+            _argocd_handle_app_get,
+        ):
+            if handler(cmd, result):
+                return
+        result.stdout = ""
+
+    def _argocd_handle_user_info(cmd, result) -> bool:
+        if _is_argocd_user_info(cmd):
+            result.stdout = "{}"
+            return True
+        return False
+
+    def _argocd_handle_logout(cmd, result) -> bool:
+        if _is_argocd_logout(cmd):
+            _argocd_logout_response(result)
+            return True
+        return False
+
+    def _argocd_handle_login(cmd, result) -> bool:
+        if _is_argocd_login(cmd):
+            _argocd_login_response(result)
+            return True
+        return False
+
+    def _argocd_handle_app_list(cmd, result) -> bool:
+        if _is_argocd_app_list_json(cmd):
+            result.stdout = _argocd_app_list_payload()
+            return True
+        return False
+
+    def _argocd_handle_app_get(cmd, result) -> bool:
+        if _is_argocd_app_get_json(cmd):
+            # Expect format: argocd app get <name> -o json
+            app_name = cmd[3] if len(cmd) >= 4 else "myapp"
+            result.stdout = _argocd_app_get_payload(app_name)
+            return True
+        return False
+
+    def _is_argocd_logout(cmd):
+        return len(cmd) >= 2 and cmd[1] == "logout"
+
+    def _argocd_logout_response(result):
+        result.stdout = "Logged out"
+        result.returncode = 0
+
+    def _is_argocd_login(cmd):
+        return len(cmd) >= 2 and cmd[1] == "login"
+
+    def _argocd_login_response(result):
+        # Accept login both with and without --grpc-web for tests
+        result.stdout = "Login Succeeded"
+        result.returncode = 0
+
+    def _is_argocd_user_info(cmd):
+        return "account" in cmd and "get-user-info" in cmd and "-o" in cmd and "json" in cmd
+
+    def _is_argocd_app_list_json(cmd):
+        return (
+            len(cmd) >= 4
+            and cmd[1] == "app"
+            and cmd[2] == "list"
+            and "-o" in cmd
+            and "json" in cmd
+        )
+
+    def _is_argocd_app_get_json(cmd):
+        return (
+            len(cmd) >= 5
+            and cmd[1] == "app"
+            and cmd[2] == "get"
+            and "-o" in cmd
+            and "json" in cmd
+        )
+
+    def _argocd_app_list_payload():
+        payload = [
+            {
+                "metadata": {"name": "myapp"},
+                "spec": {"destination": {"namespace": "default"}},
+                "status": {
+                    "health": {"status": "Healthy"},
+                    "sync": {"status": "Synced", "revision": "abcd1234"},
+                },
+            }
+        ]
+        return json.dumps(payload)
+
+    def _argocd_app_get_payload(name: str):
+        payload = {
+            "metadata": {"name": name},
+            "spec": {"destination": {"namespace": "default"}},
+            "status": {
+                "health": {"status": "Healthy"},
+                "sync": {"status": "Synced", "revision": "abcd1234"},
+            },
+        }
+        return json.dumps(payload)
 
     with patch("subprocess.run", side_effect=mock_run_side_effect) as mock_run:
         yield mock_run
@@ -84,6 +205,8 @@ def mock_subprocess_popen():
         mock_process.poll.return_value = None  # Process is running
         mock_process.returncode = 0
         mock_process.pid = 12345
+        mock_process.stdout = iter(())  # empty iterator for streaming
+        mock_process.communicate.return_value = ("", "")
         mock_popen.return_value = mock_process
         yield mock_popen
 
@@ -99,6 +222,7 @@ def mock_shutil_which():
             "k3s": "/usr/local/bin/k3s",
             "kubectl": "/usr/local/bin/kubectl",
             "helm": "/usr/local/bin/helm",
+            "argocd": "/usr/local/bin/argocd",
         }
         return available_tools.get(cmd)
 

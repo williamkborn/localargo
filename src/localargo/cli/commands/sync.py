@@ -23,6 +23,7 @@ except ImportError:
 
 import click
 
+from localargo.core.argocd import ArgoClient
 from localargo.logging import logger
 from localargo.utils.cli import run_subprocess
 
@@ -102,8 +103,20 @@ def _execute_sync_mode(
 
 def _get_application_list() -> list[str]:
     """Get list of all ArgoCD applications."""
-    result = run_subprocess(["argocd", "app", "list", "-o", "name"])
-    return [app.strip() for app in result.stdout.strip().split("\n") if app.strip()]
+    # Ensure we're authenticated before invoking argocd
+    ArgoClient()  # constructor auto-logins if needed
+    try:
+        result = run_subprocess(["argocd", "app", "list", "-o", "name"])
+    except subprocess.CalledProcessError as e:
+        logger.info(
+            "❌ Error listing applications: %s. Try 'localargo cluster password' then re-run.",
+            e,
+        )
+        raise
+    names = [app.strip() for app in result.stdout.strip().split("\n") if app.strip()]
+    if not names:
+        logger.info("i No applications found. Use 'localargo app deploy <app>' to create one.")
+    return names
 
 
 def _sync_multiple_applications(apps: list[str], *, force: bool) -> None:
@@ -124,17 +137,27 @@ def _sync_single_application_with_error_handling(app_name: str, *, force: bool) 
 def _sync_single_application(app_name: str, *, force: bool) -> None:
     """Sync a single ArgoCD application."""
     logger.info("Syncing '%s'...", app_name)
+    # Ensure authentication prior to syncing
+    ArgoClient()
     cmd = ["argocd", "app", "sync", app_name]
     if force:
         cmd.append("--force")
-    subprocess.run(cmd, check=True)
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        logger.info(
+            "❌ Error syncing '%s': %s. Try re-authenticating (localargo cluster password).",
+            app_name,
+            e,
+        )
+        raise
 
 
 def _sync_application(app_name: str, *, force: bool = False) -> None:
     """Sync a specific ArgoCD application."""
     try:
         logger.info("Syncing application '%s'...", app_name)
-
+        ArgoClient()
         cmd = ["argocd", "app", "sync", app_name]
         if force:
             cmd.append("--force")
@@ -152,7 +175,7 @@ def _sync_all_applications(*, force: bool = False) -> None:
     """Sync all ArgoCD applications."""
     try:
         logger.info("Syncing all applications...")
-
+        ArgoClient()
         apps = _get_application_list()
         if not apps:
             logger.info("No applications found")
@@ -166,7 +189,11 @@ def _sync_all_applications(*, force: bool = False) -> None:
     except FileNotFoundError:
         logger.error("❌ argocd CLI not found")
     except subprocess.CalledProcessError as e:
-        logger.info("❌ Error listing applications: %s", e)
+        logger.info(
+            "❌ Error listing applications: %s. Consider re-authenticating via "
+            "'localargo cluster password'",
+            e,
+        )
 
 
 def _sync_directory(path: str) -> None:
