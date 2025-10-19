@@ -42,16 +42,13 @@ class TestKindProvider:
         """Test is_available returns False when kubectl is not found."""
 
         def mock_which(cmd):
-            if cmd == "kind":
-                return "/usr/local/bin/kind"
-            elif cmd == "kubectl":
-                return None
-            elif cmd == "helm":
-                return "/usr/local/bin/helm"
-            return None
+            return {
+                "kind": "/usr/local/bin/kind",
+                "kubectl": None,
+                "helm": "/usr/local/bin/helm",
+            }.get(cmd)
 
-        with patch("shutil.which", side_effect=mock_which), \
-             patch("subprocess.run") as mock_run:
+        with patch("shutil.which", side_effect=mock_which), patch("subprocess.run") as mock_run:
             mock_run.return_value.stdout = "kind v0.20.0"
             provider = KindProvider(name="test")
             assert provider.is_available() is False
@@ -60,16 +57,13 @@ class TestKindProvider:
         """Test is_available returns False when helm is not found."""
 
         def mock_which(cmd):
-            if cmd == "kind":
-                return "/usr/local/bin/kind"
-            elif cmd == "kubectl":
-                return "/usr/local/bin/kubectl"
-            elif cmd == "helm":
-                return None
-            return None
+            return {
+                "kind": "/usr/local/bin/kind",
+                "kubectl": "/usr/local/bin/kubectl",
+                "helm": None,
+            }.get(cmd)
 
-        with patch("shutil.which", side_effect=mock_which), \
-             patch("subprocess.run") as mock_run:
+        with patch("shutil.which", side_effect=mock_which), patch("subprocess.run") as mock_run:
             mock_run.return_value.stdout = "kind v0.20.0"
             provider = KindProvider(name="test")
             assert provider.is_available() is False
@@ -79,10 +73,9 @@ class TestKindProvider:
         provider = KindProvider(name="demo")
 
         # Mock the installation methods
-        with patch.object(provider, "_wait_for_cluster_ready"), \
-             patch.object(provider, "_install_nginx_ingress"), \
-             patch.object(provider, "_install_argocd"):
-
+        with patch.object(provider, "_wait_for_cluster_ready"), patch.object(
+            provider, "_install_nginx_ingress"
+        ), patch.object(provider, "_install_argocd"):
             result = provider.create_cluster()
 
             assert result is True
@@ -113,11 +106,10 @@ class TestKindProvider:
 
         provider = KindProvider(name="demo")
 
-        with patch.object(provider, "is_available", return_value=True), \
-             patch("subprocess.run", side_effect=CalledProcessError(1, "kind")):
-
-            with pytest.raises(ClusterCreationError, match="Failed to create KinD cluster"):
-                provider.create_cluster()
+        with patch.object(provider, "is_available", return_value=True), patch(
+            "subprocess.run", side_effect=CalledProcessError(1, "kind")
+        ), pytest.raises(ClusterCreationError, match="Failed to create KinD cluster"):
+            provider.create_cluster()
 
     def test_delete_cluster_success(self, mock_subprocess_run):
         """Test successful cluster deletion."""

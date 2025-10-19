@@ -5,9 +5,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import tempfile
 import time
-from pathlib import Path
 from typing import Any
 
 from localargo.providers.base import (
@@ -45,10 +43,7 @@ class KindProvider(ClusterProvider):
 
             # Check helm
             helm_path = shutil.which("helm")
-            if helm_path is None:
-                return False
-
-            return True
+            return bool(helm_path)
         except (subprocess.CalledProcessError, FileNotFoundError, RuntimeError):
             return False
 
@@ -154,6 +149,8 @@ class KindProvider(ClusterProvider):
                 return
             except subprocess.CalledProcessError:
                 time.sleep(2)
+            else:
+                return
 
         msg = f"Cluster '{self.name}' failed to become ready within {timeout} seconds"
         raise ClusterCreationError(msg)
@@ -167,11 +164,22 @@ class KindProvider(ClusterProvider):
 
         try:
             # Install nginx-ingress using helm
-            subprocess.run([
-                helm_path, "upgrade", "--install", "ingress-nginx", "ingress-nginx/ingress-nginx",
-                "--namespace", "ingress-nginx", "--create-namespace",
-                "--wait", "--wait-for-jobs", "--timeout=180s"
-            ], check=True)
+            subprocess.run(
+                [
+                    helm_path,
+                    "upgrade",
+                    "--install",
+                    "ingress-nginx",
+                    "ingress-nginx/ingress-nginx",
+                    "--namespace",
+                    "ingress-nginx",
+                    "--create-namespace",
+                    "--wait",
+                    "--wait-for-jobs",
+                    "--timeout=180s",
+                ],
+                check=True,
+            )
 
         except subprocess.CalledProcessError as e:
             msg = f"Failed to install nginx-ingress: {e}"
@@ -186,17 +194,26 @@ class KindProvider(ClusterProvider):
 
         try:
             # Add ArgoCD helm repo
-            subprocess.run([
-                "helm", "repo", "add", "argo", "https://argoproj.github.io/argo-helm"
-            ], check=True)
-            subprocess.run(["helm", "repo", "update"], check=True)
+            subprocess.run([helm_path, "repo", "add", "argo", "https://argoproj.github.io/argo-helm"], check=True)
+            subprocess.run([helm_path, "repo", "update"], check=True)
 
             # Install ArgoCD
-            subprocess.run([
-                "helm", "upgrade", "--install", "argocd", "argo/argo-cd",
-                "--namespace", "argocd", "--create-namespace",
-                "--wait", "--wait-for-jobs", "--timeout=180s"
-            ], check=True)
+            subprocess.run(
+                [
+                    helm_path,
+                    "upgrade",
+                    "--install",
+                    "argocd",
+                    "argo/argo-cd",
+                    "--namespace",
+                    "argocd",
+                    "--create-namespace",
+                    "--wait",
+                    "--wait-for-jobs",
+                    "--timeout=180s",
+                ],
+                check=True,
+            )
 
         except subprocess.CalledProcessError as e:
             msg = f"Failed to install ArgoCD: {e}"
