@@ -11,7 +11,7 @@ requires-python = ">=3.8"
 license = "MIT"
 keywords = []
 authors = [
-  { name = "U.N. Owen", email = "void@some.where" },
+  { name = "William Born", email = "william.born.git@gmail.com" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -28,18 +28,19 @@ dependencies = [
   "click",
   "pyyaml",
   "rich",
+  "rich-click"
 ]
 
 [project.optional-dependencies]
-dev = ["mypy", "types-PyYAML", "pytest"]
+dev = ["mypy", "types-PyYAML", "pytest", "rich-click"]
 watch = [
   "watchdog>=2.0.0",
 ]
 
 [project.urls]
-Documentation = "https://github.com/U.N. Owen/localargo#readme"
-Issues = "https://github.com/U.N. Owen/localargo/issues"
-Source = "https://github.com/U.N. Owen/localargo"
+Documentation = "https://github.com/williamkborn/localargo#readme"
+Issues = "https://github.com/williamkborn/localargo/issues"
+Source = "https://github.com/williamkborn/localargo"
 
 [project.scripts]
 localargo = "localargo.cli:localargo"

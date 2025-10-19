@@ -6,9 +6,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-import click
+import rich_click as click
 
 from localargo.core.cluster import cluster_manager
+from localargo.eyecandy.progress_steps import StepLogger
+from localargo.eyecandy.table_renderer import TableRenderer
 from localargo.logging import logger
 from localargo.manager import ClusterManager, ClusterManagerError
 
@@ -47,13 +49,42 @@ def status(context: str | None, namespace: str) -> None:
             check=False,
         )
 
+        # Prepare status data for table display
+        status_data = {
+            "Cluster Context": cluster_status.get("context", "unknown"),
+            "Cluster Ready": "Yes" if cluster_status.get("ready", False) else "No",
+            "ArgoCD Status": "Installed" if result.returncode == 0 and result.stdout.strip() else "Not Found",
+            "Namespace": namespace,
+        }
+
+        # Use table renderer for nice display
+        table_renderer = TableRenderer()
+        table_renderer.render_key_values("Cluster Status", status_data)
+
         if result.returncode == 0 and result.stdout.strip():
             logger.info(f"✅ ArgoCD found in namespace: {namespace}")
-            # Show ArgoCD pods status
-            subprocess.run(
-                [kubectl_path, "get", "pods", "-n", namespace, "-l", "app.kubernetes.io/name=argocd-server"],
+            # Show ArgoCD pods status in a simple list
+            pod_result = subprocess.run(
+                [
+                    kubectl_path,
+                    "get",
+                    "pods",
+                    "-n",
+                    namespace,
+                    "-l",
+                    "app.kubernetes.io/name=argocd-server",
+                    "-o",
+                    "custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready",
+                ],
                 check=False,
+                capture_output=True,
+                text=True,
             )
+
+            if pod_result.returncode == 0 and pod_result.stdout.strip():
+                pod_lines = pod_result.stdout.strip().split("\n")[1:]  # Skip header
+                if pod_lines:
+                    table_renderer.render_simple_list([line for line in pod_lines if line.strip()], "ArgoCD Pods")
         else:
             logger.warning(f"❌ ArgoCD not found in namespace: {namespace}")
             logger.info("Run 'localargo cluster init' to set up ArgoCD locally")
@@ -113,27 +144,58 @@ def list_contexts() -> None:
 @click.argument("manifest", type=click.Path(exists=True), default="clusters.yaml")
 def apply(manifest: str) -> None:
     """Create clusters defined in manifest file."""
+    steps = ["loading manifest", "creating clusters", "configuring contexts", "finalizing"]
+
     try:
-        manager = ClusterManager(manifest)
-        results = manager.apply()
+        with StepLogger(steps) as step_logger:
+            step_logger.step("loading manifest", status="success", manifest_path=manifest)
 
-        successful = sum(results.values())
-        total = len(results)
+            manager = ClusterManager(manifest)
+            step_logger.step("creating clusters", status="success")
 
-        if successful == total:
-            logger.info(f"✅ Successfully created {successful}/{total} clusters")
-        else:
-            logger.warning(f"⚠️  Created {successful}/{total} clusters")
+            results = manager.apply()
 
-        # Show detailed results
-        for cluster_name, success in results.items():
-            status = "✅" if success else "❌"
-            logger.info(f"  {status} {cluster_name}")
+            successful = sum(results.values())
+            total = len(results)
+
+            # Show detailed results using table renderer
+            if results:
+                table_data = []
+                for cluster_name, success in results.items():
+                    table_data.append(
+                        {
+                            "name": cluster_name,
+                            "status": "Created" if success else "Failed",
+                            "result": "✅" if success else "❌",
+                        }
+                    )
+
+                table_renderer = TableRenderer()
+                table_renderer.render_list(["Cluster", "Status", "Result"], table_data)
+
+            if successful == total:
+                step_logger.step("configuring contexts", status="success")
+                step_logger.step("finalizing", status="success")
+            else:
+                step_logger.step(
+                    "configuring contexts", status="warning", message=f"Only {successful}/{total} clusters created"
+                )
+                step_logger.step("finalizing", status="warning")
 
     except ClusterManagerError as e:
+        # Log the error step if we have an active step logger
+        from contextlib import suppress
+
+        with suppress(NameError):
+            step_logger.step("creating clusters", status="error", error_msg=str(e))
         logger.error(f"Error applying manifest: {e}")
         raise click.ClickException(str(e)) from e
     except Exception as e:
+        # Log the error step if we have an active step logger
+        from contextlib import suppress
+
+        with suppress(NameError):
+            step_logger.step("creating clusters", status="error", error_msg=str(e))
         logger.error(f"Unexpected error: {e}")
         raise click.ClickException(str(e)) from e
 
@@ -178,6 +240,8 @@ def status_manifest(manifest: str) -> None:
         ready_count = 0
         exists_count = 0
 
+        # Prepare data for table display
+        table_data = []
         for cluster_name, status_info in results.items():
             exists = status_info.get("exists", False)
             ready = status_info.get("ready", False)
@@ -187,16 +251,37 @@ def status_manifest(manifest: str) -> None:
                 if ready:
                     ready_count += 1
 
+            # Determine status for table
             if "error" in status_info:
-                logger.error(f"❌ {cluster_name}: {status_info['error']}")
+                status = f"Error: {status_info['error']}"
             elif ready:
-                logger.info(f"✅ {cluster_name}: ready")
+                status = "Ready"
             elif exists:
-                logger.warning(f"⚠️  {cluster_name}: exists but not ready")
+                status = "Exists (not ready)"
             else:
-                logger.warning(f"❌ {cluster_name}: does not exist")
+                status = "Does not exist"
 
-        logger.info(f"Summary: {ready_count}/{exists_count} clusters ready, {len(results)} total")
+            table_data.append(
+                {
+                    "Cluster": cluster_name,
+                    "Exists": "Yes" if exists else "No",
+                    "Ready": "Yes" if ready else "No",
+                    "Status": status,
+                }
+            )
+
+        # Use table renderer for nice display
+        table_renderer = TableRenderer()
+        table_renderer.render_list(["Cluster", "Exists", "Ready", "Status"], table_data)
+
+        # Show summary
+        summary_data = {
+            "Total Clusters": len(results),
+            "Existing Clusters": exists_count,
+            "Ready Clusters": ready_count,
+            "Success Rate": f"{ready_count}/{exists_count}" if exists_count > 0 else "N/A",
+        }
+        table_renderer.render_key_values("Summary", summary_data)
 
     except ClusterManagerError as e:
         logger.error(f"Error getting cluster status: {e}")

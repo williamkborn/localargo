@@ -3,7 +3,7 @@ from __future__ import annotations
 
 #
 # SPDX-License-Identifier: MIT
-import click
+import rich_click as click
 
 from localargo.__about__ import __version__
 from localargo.cli.commands import app, cluster, debug, port_forward, secrets, sync, template
@@ -18,7 +18,8 @@ def localargo(*, verbose: bool) -> None:
     # Initialize logging
     init_cli_logging(verbose=verbose)
 
-    if click.get_current_context().invoked_subcommand is None:
+    ctx = click.get_current_context()
+    if ctx is None or ctx.invoked_subcommand is None:
         logger.info("Localargo - Convenient ArgoCD local development tool")
         logger.info("Run 'localargo --help' for available commands.")
 

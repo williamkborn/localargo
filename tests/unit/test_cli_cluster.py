@@ -31,8 +31,10 @@ clusters:
             result = runner.invoke(apply, [str(manifest_file)])
 
         assert result.exit_code == 0
-        # Check that the command ran without error (output format may vary)
-        assert result.output == ""  # Click commands don't always output to stdout in tests
+        # Check that the command ran without error and step logger was used
+        assert "Starting workflow" in result.output
+        assert "loading manifest" in result.output
+        assert "✅" in result.output  # Step logger success indicators
 
     def test_apply_command_partial_success(self, tmp_path):
         """Test apply command with partial success."""
