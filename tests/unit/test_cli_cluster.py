@@ -7,197 +7,112 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from localargo.cli.commands.cluster import apply, delete, status_manifest
-from localargo.manager import ClusterManagerError
-
-from ..test_utils import create_multi_cluster_yaml
+from localargo.cli.commands.cluster import delete, init, status
 
 
 class TestCLICluster:
     """Test suite for cluster CLI commands."""
 
-    def test_apply_command_success(self, create_manifest_file, create_mock_cluster_manager):
-        """Test apply command with successful cluster creation."""
-        manifest_file = create_manifest_file()
-
-        mock_manager = create_mock_cluster_manager({"test-cluster": True})
-
-        with patch("localargo.cli.commands.cluster.ClusterManager", return_value=mock_manager):
+    def test_init_command_success(self):
+        """Test init command with successful cluster creation."""
+        with patch(
+            "localargo.core.cluster.cluster_manager.create_cluster", return_value=True
+        ) as mock_create:
             runner = CliRunner()
-            result = runner.invoke(apply, [str(manifest_file)])
+            result = runner.invoke(init, ["--provider", "kind", "--name", "test-cluster"])
 
         assert result.exit_code == 0
-        # Check that the command ran without error and step logger was used
-        assert "Starting workflow" in result.output
-        assert "loading manifest" in result.output
-        assert "✅" in result.output  # Step logger success indicators
+        # Verify that create_cluster was called with correct arguments
+        mock_create.assert_called_once_with("kind", "test-cluster")
 
-    def test_apply_command_partial_success(
-        self, create_manifest_file, create_mock_cluster_manager
-    ):
-        """Test apply command with partial success."""
-        yaml_content = create_multi_cluster_yaml()
-        manifest_file = create_manifest_file(yaml_content)
-
-        mock_manager = create_mock_cluster_manager({"cluster1": True, "cluster2": False})
-
-        with patch("localargo.cli.commands.cluster.ClusterManager", return_value=mock_manager):
+    def test_init_command_failure(self):
+        """Test init command with cluster creation failure."""
+        with patch(
+            "localargo.core.cluster.cluster_manager.create_cluster", return_value=False
+        ) as mock_create:
             runner = CliRunner()
-            result = runner.invoke(apply, [str(manifest_file)])
+            result = runner.invoke(init, ["--provider", "kind", "--name", "test-cluster"])
+
+        assert result.exit_code == 0  # Command succeeds but logs failure
+        mock_create.assert_called_once_with("kind", "test-cluster")
+
+    def test_init_command_with_k3s_provider(self):
+        """Test init command with k3s provider."""
+        with patch(
+            "localargo.core.cluster.cluster_manager.create_cluster", return_value=True
+        ) as mock_create:
+            runner = CliRunner()
+            result = runner.invoke(init, ["--provider", "k3s", "--name", "test-cluster"])
 
         assert result.exit_code == 0
+        mock_create.assert_called_once_with("k3s", "test-cluster")
 
-    def test_apply_command_unexpected_error(self, create_manifest_file):
-        """Test apply command with unexpected error."""
-        manifest_file = create_manifest_file()
-
-        with patch("localargo.cli.commands.cluster.ClusterManager") as mock_class:
-            mock_class.side_effect = Exception("Unexpected error")
-
-            runner = CliRunner()
-            result = runner.invoke(apply, [str(manifest_file)])
-
-        assert result.exit_code == 1
-
-    def test_delete_command_success(self, create_manifest_file, create_mock_cluster_manager):
+    def test_delete_command_success(self):
         """Test delete command with successful cluster deletion."""
-        manifest_file = create_manifest_file()
-
-        mock_manager = create_mock_cluster_manager({"test-cluster": True})
-
-        with patch("localargo.cli.commands.cluster.ClusterManager", return_value=mock_manager):
+        with patch(
+            "localargo.core.cluster.cluster_manager.delete_cluster", return_value=True
+        ) as mock_delete:
             runner = CliRunner()
-            result = runner.invoke(delete, [str(manifest_file)])
+            result = runner.invoke(delete, ["test-cluster", "--provider", "kind"])
 
         assert result.exit_code == 0
+        mock_delete.assert_called_once_with("kind", "test-cluster")
 
-    def test_delete_command_manifest_error(self, create_manifest_file):
-        """Test delete command with manifest error."""
-        manifest_file = create_manifest_file("invalid: yaml: content", "invalid.yaml")
-
-        with patch("localargo.cli.commands.cluster.ClusterManager") as mock_class:
-            mock_class.side_effect = ClusterManagerError("Failed to load manifest")
-
+    def test_delete_command_failure(self):
+        """Test delete command with cluster deletion failure."""
+        with patch(
+            "localargo.core.cluster.cluster_manager.delete_cluster", return_value=False
+        ) as mock_delete:
             runner = CliRunner()
-            result = runner.invoke(delete, [str(manifest_file)])
+            result = runner.invoke(delete, ["test-cluster", "--provider", "kind"])
 
         assert result.exit_code == 1
+        mock_delete.assert_called_once_with("kind", "test-cluster")
 
-    def test_status_command_success(self, create_manifest_file, create_mock_cluster_manager):
-        """Test status command with successful cluster status."""
-        manifest_file = create_manifest_file()
-
-        mock_manager = create_mock_cluster_manager(
-            {
-                "test-cluster": {
-                    "provider": "kind",
-                    "name": "test-cluster",
-                    "exists": True,
-                    "ready": True,
-                }
-            }
-        )
-
-        with patch("localargo.cli.commands.cluster.ClusterManager", return_value=mock_manager):
+    def test_delete_command_with_k3s_provider(self):
+        """Test delete command with k3s provider."""
+        with patch(
+            "localargo.core.cluster.cluster_manager.delete_cluster", return_value=True
+        ) as mock_delete:
             runner = CliRunner()
-            result = runner.invoke(status_manifest, [str(manifest_file)])
+            result = runner.invoke(delete, ["test-cluster", "--provider", "k3s"])
 
         assert result.exit_code == 0
+        mock_delete.assert_called_once_with("k3s", "test-cluster")
 
-    def test_status_command_not_ready_cluster(
-        self, create_manifest_file, create_mock_cluster_manager
-    ):
-        """Test status command with not ready cluster."""
-        manifest_file = create_manifest_file()
-
-        mock_manager = create_mock_cluster_manager(
-            {
-                "test-cluster": {
-                    "provider": "kind",
-                    "name": "test-cluster",
-                    "exists": True,
-                    "ready": False,
-                }
-            }
-        )
-
-        with patch("localargo.cli.commands.cluster.ClusterManager", return_value=mock_manager):
+    def test_delete_command_exception_handling(self):
+        """Test delete command with exception during deletion."""
+        with patch(
+            "localargo.core.cluster.cluster_manager.delete_cluster",
+            side_effect=Exception("Test error"),
+        ) as mock_delete:
             runner = CliRunner()
-            result = runner.invoke(status_manifest, [str(manifest_file)])
+            result = runner.invoke(delete, ["test-cluster", "--provider", "kind"])
+
+        assert result.exit_code == 1
+        mock_delete.assert_called_once_with("kind", "test-cluster")
+
+    def test_status_command_with_context(self):
+        """Test status command with specific context."""
+        runner = CliRunner()
+        result = runner.invoke(status, ["--context", "kind-test"])
 
         assert result.exit_code == 0
+        assert "Cluster Context" in result.output
+        assert "kind-test" in result.output
 
-    def test_status_command_missing_cluster(
-        self, create_manifest_file, create_mock_cluster_manager
-    ):
-        """Test status command with missing cluster."""
-        manifest_file = create_manifest_file()
-
-        mock_manager = create_mock_cluster_manager(
-            {
-                "test-cluster": {
-                    "provider": "kind",
-                    "name": "test-cluster",
-                    "exists": False,
-                    "ready": False,
-                }
-            }
-        )
-
-        with patch("localargo.cli.commands.cluster.ClusterManager", return_value=mock_manager):
-            runner = CliRunner()
-            result = runner.invoke(status_manifest, [str(manifest_file)])
+    def test_status_command_without_context(self):
+        """Test status command without specific context."""
+        runner = CliRunner()
+        result = runner.invoke(status, [])
 
         assert result.exit_code == 0
+        assert "Cluster Context" in result.output
 
-    def test_status_command_with_error(
-        self, create_manifest_file, create_mock_cluster_manager
-    ):
-        """Test status command with cluster error."""
-        manifest_file = create_manifest_file()
-
-        mock_manager = create_mock_cluster_manager(
-            {
-                "test-cluster": {
-                    "error": "Connection failed",
-                    "exists": False,
-                    "ready": False,
-                }
-            }
-        )
-
-        with patch("localargo.cli.commands.cluster.ClusterManager", return_value=mock_manager):
-            runner = CliRunner()
-            result = runner.invoke(status_manifest, [str(manifest_file)])
+    def test_status_command_with_argocd_installed(self):
+        """Test status command when ArgoCD is installed."""
+        runner = CliRunner()
+        result = runner.invoke(status, [])
 
         assert result.exit_code == 0
-
-    def test_status_command_multiple_clusters(
-        self, create_manifest_file, create_mock_cluster_manager
-    ):
-        """Test status command with multiple clusters."""
-        yaml_content = create_multi_cluster_yaml()
-        manifest_file = create_manifest_file(yaml_content)
-
-        mock_manager = create_mock_cluster_manager(
-            {
-                "cluster1": {
-                    "provider": "kind",
-                    "name": "cluster1",
-                    "exists": True,
-                    "ready": True,
-                },
-                "cluster2": {
-                    "provider": "k3s",
-                    "name": "cluster2",
-                    "exists": False,
-                    "ready": False,
-                },
-            }
-        )
-
-        with patch("localargo.cli.commands.cluster.ClusterManager", return_value=mock_manager):
-            runner = CliRunner()
-            result = runner.invoke(status_manifest, [str(manifest_file)])
-
-        assert result.exit_code == 0
+        assert "ArgoCD Status" in result.output

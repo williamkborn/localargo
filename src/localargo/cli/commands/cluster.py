@@ -9,15 +9,12 @@ This module provides commands for managing Kubernetes clusters used for ArgoCD d
 from __future__ import annotations
 
 import subprocess
-from contextlib import suppress
 
 import rich_click as click
 
 from localargo.core.cluster import cluster_manager
-from localargo.eyecandy.progress_steps import StepLogger
 from localargo.eyecandy.table_renderer import TableRenderer
 from localargo.logging import logger
-from localargo.manager import ClusterManager, ClusterManagerError
 from localargo.utils.cli import (
     build_kubectl_get_cmd,
     ensure_kubectl_available,
@@ -167,153 +164,22 @@ def list_contexts() -> None:
         logger.error("No contexts found or kubectl not available")
 
 
-# Declarative cluster management commands
-
-
 @cluster.command()
-@click.argument("manifest", type=click.Path(exists=True), default="clusters.yaml")
-def apply(manifest: str) -> None:
-    """Create clusters defined in manifest file."""
-    steps = ["loading manifest", "creating clusters", "configuring contexts", "finalizing"]
+@click.argument("name")
+@click.option(
+    "--provider",
+    type=click.Choice(["kind", "k3s"]),
+    default="kind",
+    help="Cluster provider",
+)
+def delete(name: str, provider: str) -> None:
+    """Delete a specific cluster."""
+    logger.info("Deleting %s cluster '%s'...", provider, name)
 
-    try:
-        with StepLogger(steps) as step_logger:
-            step_logger.step("loading manifest", status="success", manifest_path=manifest)
-
-            manager = ClusterManager(manifest)
-            step_logger.step("creating clusters", status="success")
-
-            results = manager.apply()
-
-            successful = sum(results.values())
-            total = len(results)
-
-            # Show detailed results using table renderer
-            if results:
-                table_data = []
-                for cluster_name, success in results.items():
-                    table_data.append(
-                        {
-                            "name": cluster_name,
-                            "status": "Created" if success else "Failed",
-                            "result": "✅" if success else "❌",
-                        }
-                    )
-
-                table_renderer = TableRenderer()
-                table_renderer.render_list(["Cluster", "Status", "Result"], table_data)
-
-            if successful == total:
-                step_logger.step("configuring contexts", status="success")
-                step_logger.step("finalizing", status="success")
-            else:
-                step_logger.step(
-                    "configuring contexts",
-                    status="warning",
-                    message=f"Only {successful}/{total} clusters created",
-                )
-                step_logger.step("finalizing", status="warning")
-
-    except ClusterManagerError as e:
-        # Log the error step if we have an active step logger
-        with suppress(NameError):
-            step_logger.step("creating clusters", status="error", error_msg=str(e))
-            logger.error("Error applying manifest: %s", e)
-        raise click.ClickException(str(e)) from e
-    except Exception as e:
-        # Log the error step if we have an active step logger
-        with suppress(NameError):
-            step_logger.step("creating clusters", status="error", error_msg=str(e))
-        logger.error("Unexpected error: %s", e)
-        raise click.ClickException(str(e)) from e
-
-
-@cluster.command()
-@click.argument("manifest", type=click.Path(exists=True), default="clusters.yaml")
-def delete(manifest: str) -> None:
-    """Delete clusters defined in manifest file."""
-    try:
-        manager = ClusterManager(manifest)
-        results = manager.delete()
-
-        successful = sum(results.values())
-        total = len(results)
-
-        if successful == total:
-            logger.info("✅ Successfully deleted %s/%s clusters", successful, total)
-        else:
-            logger.warning("⚠️  Deleted %s/%s clusters", successful, total)
-
-        # Show detailed results
-        for cluster_name, success in results.items():
-            cluster_status = "✅" if success else "❌"
-            logger.info("  %s %s", cluster_status, cluster_name)
-
-    except ClusterManagerError as e:
-        logger.error("Error deleting clusters: %s", e)
-        raise click.ClickException(str(e)) from e
-    except Exception as e:
-        logger.error("Unexpected error: %s", e)
-        raise click.ClickException(str(e)) from e
-
-
-@cluster.command()
-@click.argument("manifest", type=click.Path(exists=True), default="clusters.yaml")
-def status_manifest(manifest: str) -> None:
-    """Show status of clusters defined in manifest file."""
-    try:
-        manager = ClusterManager(manifest)
-        results = manager.status()
-
-        ready_count = 0
-        exists_count = 0
-
-        # Prepare data for table display
-        table_data = []
-        for cluster_name, status_info in results.items():
-            exists = status_info.get("exists", False)
-            ready = status_info.get("ready", False)
-
-            if exists:
-                exists_count += 1
-                if ready:
-                    ready_count += 1
-
-            # Determine status for table
-            if "error" in status_info:
-                cluster_status = f"Error: {status_info['error']}"
-            elif ready:
-                cluster_status = "Ready"
-            elif exists:
-                cluster_status = "Exists (not ready)"
-            else:
-                cluster_status = "Does not exist"
-
-            table_data.append(
-                {
-                    "Cluster": cluster_name,
-                    "Exists": "Yes" if exists else "No",
-                    "Ready": "Yes" if ready else "No",
-                    "Status": cluster_status,
-                }
-            )
-
-        # Use table renderer for nice display
-        table_renderer = TableRenderer()
-        table_renderer.render_list(["Cluster", "Exists", "Ready", "Status"], table_data)
-
-        # Show summary
-        summary_data = {
-            "Total Clusters": len(results),
-            "Existing Clusters": exists_count,
-            "Ready Clusters": ready_count,
-            "Success Rate": f"{ready_count}/{exists_count}" if exists_count > 0 else "N/A",
-        }
-        table_renderer.render_key_values("Summary", summary_data)
-
-    except ClusterManagerError as e:
-        logger.error("Error getting cluster status: %s", e)
-        raise click.ClickException(str(e)) from e
-    except Exception as e:
-        logger.error("Unexpected error: %s", e)
-        raise click.ClickException(str(e)) from e
+    success = cluster_manager.delete_cluster(provider, name)
+    if success:
+        logger.info("✅ Cluster '%s' deleted successfully", name)
+    else:
+        error_msg = f"Failed to delete cluster '{name}'"
+        logger.error("❌ %s", error_msg)
+        raise click.ClickException(error_msg)

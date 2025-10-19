@@ -200,7 +200,7 @@ class KindProvider(ClusterProvider):
                     "--set",
                     'controller.config.ssl-protocols="TLSv1.2 TLSv1.3"',
                     "--set",
-                    'controller.nodeSelector."kubernetes\\.io/os"=linux',
+                    r"controller.nodeSelector.kubernetes\.io/os=linux",
                 ],
                 check=True,
             )

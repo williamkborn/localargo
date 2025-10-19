@@ -5,7 +5,7 @@
 
 """Tests for CLI eye candy integration."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from click.testing import CliRunner
 
@@ -30,35 +30,22 @@ class TestCliEyeCandy:
         # Note: rich-click may not always add markup, but basic structure should be there
         assert "Localargo" in output or "localargo" in output.lower()
 
-    def test_cluster_apply_with_step_logger(self, tmp_path):
-        """Test cluster apply command uses step logger."""
-        # Create a temporary manifest file
-        yaml_content = """
-clusters:
-  - name: test-cluster
-    provider: kind
-"""
-        manifest_file = tmp_path / "clusters.yaml"
-        manifest_file.write_text(yaml_content)
-
+    def test_cluster_init_with_logging(self):
+        """Test cluster init command provides appropriate logging."""
         runner = CliRunner()
 
-        # Mock the ClusterManager to avoid actual cluster operations
-        with patch("localargo.cli.commands.cluster.ClusterManager") as mock_manager_class:
-            mock_manager = Mock()
-            mock_manager_class.return_value = mock_manager
-            mock_manager.apply.return_value = {"test-cluster": True}
-
-            # Run the apply command
-            result = runner.invoke(localargo, ["cluster", "apply", str(manifest_file)])
+        # Mock the cluster manager to avoid actual cluster operations
+        with patch("localargo.core.cluster.cluster_manager.create_cluster", return_value=True):
+            # Run the init command
+            result = runner.invoke(
+                localargo, ["cluster", "init", "--provider", "kind", "--name", "test-cluster"]
+            )
 
             # Check that it ran without errors
             assert result.exit_code == 0
 
-            # Check that step logger output appears
-            assert "Starting workflow" in result.output
-            assert "loading manifest" in result.output
-            assert "✅" in result.output
+            # Check that appropriate logging appears
+            assert "Initializing" in result.output
 
     def test_cluster_status_with_table_renderer(self):
         """Test cluster status command uses table renderer."""
@@ -89,46 +76,22 @@ clusters:
                 or "Cluster Context" in result.output
             )
 
-    def test_cluster_status_manifest_with_table_renderer(self, tmp_path):
-        """Test cluster status-manifest command uses table renderer."""
-        # Create a temporary manifest file
-        yaml_content = """
-clusters:
-  - name: test-cluster
-    provider: kind
-  - name: failed-cluster
-    provider: k3s
-"""
-        manifest_file = tmp_path / "clusters.yaml"
-        manifest_file.write_text(yaml_content)
-
+    def test_cluster_delete_with_logging(self):
+        """Test cluster delete command provides appropriate logging."""
         runner = CliRunner()
 
-        # Mock the ClusterManager to avoid actual operations
-        with patch("localargo.cli.commands.cluster.ClusterManager") as mock_manager_class:
-            mock_manager = Mock()
-            mock_manager_class.return_value = mock_manager
-            mock_manager.status.return_value = {
-                "test-cluster": {"exists": True, "ready": True},
-                "failed-cluster": {
-                    "exists": True,
-                    "ready": False,
-                    "error": "Connection failed",
-                },
-            }
-
-            # Run the status-manifest command
+        # Mock the cluster manager to avoid actual cluster operations
+        with patch("localargo.core.cluster.cluster_manager.delete_cluster", return_value=True):
+            # Run the delete command
             result = runner.invoke(
-                localargo, ["cluster", "status-manifest", str(manifest_file)]
+                localargo, ["cluster", "delete", "test-cluster", "--provider", "kind"]
             )
 
             # Check that it ran without errors
             assert result.exit_code == 0
 
-            # Check that table renderer was used
-            assert "Cluster" in result.output
-            assert "test-cluster" in result.output
-            assert "failed-cluster" in result.output
+            # Check that appropriate logging appears
+            assert "Deleting" in result.output
 
     def test_rich_click_integration(self):
         """Test that rich-click is properly integrated."""
