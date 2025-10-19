@@ -16,7 +16,7 @@ If you want to install from source or contribute to development:
 
 ```bash
 # Clone the repository
-git clone https://github.com/U.N. Owen/localargo.git
+git clone https://github.com/William Born/localargo.git
 cd localargo
 
 # Install in development mode

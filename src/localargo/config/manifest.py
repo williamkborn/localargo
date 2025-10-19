@@ -1,8 +1,11 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+"""Declarative cluster manifest loader and validator."""
+
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +16,6 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
-"""Declarative cluster manifest loader and validator."""
-
 
 class ManifestError(Exception):
     """Base exception for manifest-related errors."""
@@ -24,40 +25,29 @@ class ManifestValidationError(ManifestError):
     """Raised when manifest validation fails."""
 
 
+@dataclass
 class ClusterConfig:
     """Configuration for a single cluster."""
 
-    def __init__(self, name: str, provider: str, **kwargs: Any):
-        """
-        Initialize cluster configuration.
+    name: str
+    provider: str
+    kwargs: dict[str, Any] = field(default_factory=dict)
 
-        Args:
-            name: Name of the cluster
-            provider: Provider name (e.g., 'kind', 'k3s')
-            **kwargs: Additional provider-specific configuration
-        """
+    def __init__(self, name: str, provider: str, **kwargs: Any) -> None:
         self.name = name
         self.provider = provider
         self.kwargs = kwargs
 
     def __repr__(self) -> str:
-        return f"ClusterConfig(name={self.name!r}, provider={self.provider!r})"
+        kwargs_str = f", kwargs={self.kwargs!r}" if self.kwargs else ""
+        return f"ClusterConfig(name={self.name!r}, provider={self.provider!r}{kwargs_str})"
 
 
+@dataclass
 class ClusterManifest:
     """Cluster manifest containing multiple cluster configurations."""
 
-    def __init__(self, clusters: list[ClusterConfig]):
-        """
-        Initialize cluster manifest.
-
-        Args:
-            clusters: List of cluster configurations
-        """
-        self.clusters = clusters
-
-    def __repr__(self) -> str:
-        return f"ClusterManifest(clusters={self.clusters!r})"
+    clusters: list[ClusterConfig]
 
 
 def load_manifest(manifest_path: str | Path) -> ClusterManifest:
@@ -65,10 +55,10 @@ def load_manifest(manifest_path: str | Path) -> ClusterManifest:
     Load cluster manifest from YAML file.
 
     Args:
-        manifest_path: Path to YAML manifest file
+        manifest_path (str | Path): Path to YAML manifest file
 
     Returns:
-        ClusterManifest object
+        ClusterManifest: Loaded cluster manifest object
 
     Raises:
         ManifestError: If manifest cannot be loaded or is invalid
@@ -98,11 +88,10 @@ def _parse_manifest_data(data: Any) -> ClusterManifest:
     Parse manifest data and validate structure.
 
     Args:
-        data: Parsed YAML data
-        manifest_path: Path to manifest file for error reporting
+        data (Any): Parsed YAML data
 
     Returns:
-        ClusterManifest object
+        ClusterManifest: Validated cluster manifest object
 
     Raises:
         ManifestValidationError: If data structure is invalid
@@ -137,12 +126,11 @@ def _parse_cluster_data(cluster_data: Any, index: int) -> ClusterConfig:
     Parse individual cluster configuration.
 
     Args:
-        cluster_data: Cluster configuration data
-        manifest_path: Path to manifest file for error reporting
-        index: Cluster index for error reporting
+        cluster_data (Any): Cluster configuration data
+        index (int): Cluster index for error reporting
 
     Returns:
-        ClusterConfig object
+        ClusterConfig: Parsed cluster configuration object
 
     Raises:
         ManifestValidationError: If cluster data is invalid
@@ -189,13 +177,10 @@ def validate_manifest(manifest_path: str | Path) -> bool:
     Validate manifest file without loading it.
 
     Args:
-        manifest_path: Path to manifest file
+        manifest_path (str | Path): Path to manifest file
 
     Returns:
-        True if manifest is valid
-
-    Raises:
-        ManifestError: If manifest is invalid
+        bool: True if manifest is valid
     """
     load_manifest(manifest_path)
     return True

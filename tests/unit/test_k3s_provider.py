@@ -1,12 +1,20 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+"""Tests for K3s provider functionality."""
+
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+# pylint: disable=protected-access
+from subprocess import CalledProcessError
 from unittest.mock import patch
 
 import pytest
 
-from localargo.providers.base import ClusterCreationError, ClusterOperationError, ProviderNotAvailableError
-from localargo.providers.k3s import K3sProvider
+from localargo.providers.base import (
+    ClusterCreationError,
+    ClusterOperationError,
+    ProviderNotAvailableError,
+)
+from localargo.providers.k3s import K3sProvider, build_k3s_server_command
 
 
 class TestK3sProvider:
@@ -41,8 +49,6 @@ class TestK3sProvider:
 
     def test_is_available_with_k3s_command_failure(self, mock_subprocess_run):
         """Test is_available returns False when k3s command fails."""
-        from subprocess import CalledProcessError
-
         mock_subprocess_run.side_effect = CalledProcessError(1, "k3s")
 
         provider = K3sProvider(name="test")
@@ -54,9 +60,10 @@ class TestK3sProvider:
         provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"  # noqa: SLF001
 
         # Mock the private methods
-        with patch.object(provider, "_wait_for_cluster_ready") as mock_wait, patch.object(
-            provider, "_configure_kubectl_context"
-        ) as mock_configure:
+        with (
+            patch.object(provider, "_wait_for_cluster_ready") as mock_wait,
+            patch.object(provider, "_configure_kubectl_context") as mock_configure,
+        ):
             result = provider.create_cluster()
 
             assert result is True
@@ -66,17 +73,7 @@ class TestK3sProvider:
             # Verify the k3s server command was started
             mock_subprocess_popen.assert_called_once()
             call_args = mock_subprocess_popen.call_args
-            expected_cmd = [
-                "k3s",
-                "server",
-                "--cluster-init",
-                "--disable",
-                "traefik",
-                "--disable",
-                "servicelb",
-                "--write-kubeconfig",
-                "/tmp/test-kubeconfig.yaml",
-            ]
+            expected_cmd = build_k3s_server_command("/tmp/test-kubeconfig.yaml")
             assert call_args[0][0] == expected_cmd
 
             # Verify environment variables
@@ -96,9 +93,11 @@ class TestK3sProvider:
         """Test create_cluster raises ClusterCreationError when Popen fails."""
         provider = K3sProvider(name="demo")
 
-        with patch.object(provider, "is_available", return_value=True), patch(
-            "subprocess.Popen", side_effect=Exception("Popen failed")
-        ), pytest.raises(ClusterCreationError, match="Unexpected error creating k3s cluster"):
+        with (
+            patch.object(provider, "is_available", return_value=True),
+            patch("subprocess.Popen", side_effect=Exception("Popen failed")),
+            pytest.raises(ClusterCreationError, match="Unexpected error creating k3s cluster"),
+        ):
             provider.create_cluster()
 
     def test_delete_cluster_raises_operation_error(self):
@@ -118,7 +117,9 @@ class TestK3sProvider:
         with pytest.raises(ClusterOperationError) as exc_info:
             provider.delete_cluster(name="custom-cluster")
 
-        assert "k3s cluster 'custom-cluster' deletion must be done manually" in str(exc_info.value)
+        assert "k3s cluster 'custom-cluster' deletion must be done manually" in str(
+            exc_info.value
+        )
 
     def test_get_cluster_status_with_kubeconfig_exists_and_ready(self, mock_subprocess_run):
         """Test cluster status when kubeconfig exists and cluster is ready."""
@@ -140,7 +141,15 @@ class TestK3sProvider:
 
             # Verify kubectl command was called
             mock_subprocess_run.assert_called_once_with(
-                ["/usr/local/bin/kubectl", "--kubeconfig", "/tmp/test-kubeconfig.yaml", "cluster-info"], check=True
+                [
+                    "kubectl",
+                    "--kubeconfig",
+                    "/tmp/test-kubeconfig.yaml",
+                    "cluster-info",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
             )
 
     def test_get_cluster_status_with_kubeconfig_not_exists(self, mock_subprocess_run):
@@ -166,13 +175,12 @@ class TestK3sProvider:
 
     def test_get_cluster_status_with_kubeconfig_exists_but_not_ready(self):
         """Test cluster status when kubeconfig exists but kubectl fails."""
-        from subprocess import CalledProcessError
-
         provider = K3sProvider(name="demo")
         provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"  # noqa: SLF001
 
-        with patch("pathlib.Path.exists", return_value=True), patch(
-            "subprocess.run", side_effect=CalledProcessError(1, "kubectl")
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("subprocess.run", side_effect=CalledProcessError(1, "kubectl")),
         ):
             status = provider.get_cluster_status()
 
@@ -206,13 +214,12 @@ class TestK3sProvider:
 
     def test_get_cluster_status_explicit_patch(self):
         """Test cluster status retrieval using explicit subprocess patching."""
-        from unittest.mock import patch
-
         provider = K3sProvider(name="demo")
         provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"  # noqa: SLF001
 
-        with patch("localargo.providers.k3s.subprocess.run") as mock_run, patch(
-            "pathlib.Path.exists", return_value=True
+        with (
+            patch("localargo.providers.k3s.subprocess.run") as mock_run,
+            patch("pathlib.Path.exists", return_value=True),
         ):
             mock_run.return_value.returncode = 0
             status = provider.get_cluster_status()
@@ -229,5 +236,13 @@ class TestK3sProvider:
 
             # Verify kubectl command was called
             mock_run.assert_called_once_with(
-                ["/usr/local/bin/kubectl", "--kubeconfig", "/tmp/test-kubeconfig.yaml", "cluster-info"], check=True
+                [
+                    "kubectl",
+                    "--kubeconfig",
+                    "/tmp/test-kubeconfig.yaml",
+                    "cluster-info",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
             )

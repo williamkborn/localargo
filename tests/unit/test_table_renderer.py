@@ -1,9 +1,12 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 
 #
 # SPDX-License-Identifier: MIT
 
 """Tests for table renderer UI component."""
+
+import shutil
+from unittest.mock import MagicMock, patch
 
 from rich.console import Console
 
@@ -46,7 +49,12 @@ class TestTableRenderer:
         """Test rendering key-value pairs displays panel correctly."""
         console = Console(record=True)
         renderer = TableRenderer(console)
-        data = {"Cluster": "test-cluster", "Status": "ready", "Provider": "kind", "Context": "kind-test-cluster"}
+        data = {
+            "Cluster": "test-cluster",
+            "Status": "ready",
+            "Provider": "kind",
+            "Context": "kind-test-cluster",
+        }
 
         renderer.render_key_values("Cluster Info", data)
 
@@ -61,8 +69,18 @@ class TestTableRenderer:
         console = Console(record=True)
         renderer = TableRenderer(console)
         clusters = [
-            {"name": "test-cluster", "provider": "kind", "status": "ready", "context": "kind-test-cluster"},
-            {"name": "failed-cluster", "provider": "k3s", "status": "failed", "context": "k3s-failed-cluster"},
+            {
+                "name": "test-cluster",
+                "provider": "kind",
+                "status": "ready",
+                "context": "kind-test-cluster",
+            },
+            {
+                "name": "failed-cluster",
+                "provider": "k3s",
+                "status": "failed",
+                "context": "k3s-failed-cluster",
+            },
         ]
 
         renderer.render_status_table(clusters)
@@ -140,15 +158,11 @@ class TestTableRenderer:
         renderer = TableRenderer(console)
 
         # Test with very narrow terminal (should not crash)
-        import shutil
-
         original_columns = shutil.get_terminal_size().columns
 
         try:
             # Mock a narrow terminal
-            import unittest.mock
-
-            with unittest.mock.patch("shutil.get_terminal_size", return_value=unittest.mock.MagicMock(columns=40)):
+            with patch("shutil.get_terminal_size", return_value=MagicMock(columns=40)):
                 clusters = [{"name": "verylongclustername", "status": "ready"}]
                 # Should not raise an exception
                 renderer.render_status_table(clusters)
@@ -157,7 +171,8 @@ class TestTableRenderer:
                 assert "verylongclustername" in output
         finally:
             # Restore original terminal size
-            with unittest.mock.patch(
-                "shutil.get_terminal_size", return_value=unittest.mock.MagicMock(columns=original_columns)
+            with patch(
+                "shutil.get_terminal_size",
+                return_value=MagicMock(columns=original_columns),
             ):
                 pass

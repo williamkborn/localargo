@@ -1,4 +1,6 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+"""Tests for manifest loading and validation functionality."""
+
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 from unittest.mock import patch
@@ -90,7 +92,9 @@ version: 1.0
         manifest_file = tmp_path / "invalid.yaml"
         manifest_file.write_text(yaml_content)
 
-        with pytest.raises(ManifestValidationError, match="Manifest must contain 'clusters' key"):
+        with pytest.raises(
+            ManifestValidationError, match="Manifest must contain 'clusters' key"
+        ):
             load_manifest(str(manifest_file))
 
     def test_load_manifest_clusters_not_list(self, tmp_path):
@@ -103,7 +107,9 @@ clusters:
         manifest_file = tmp_path / "invalid.yaml"
         manifest_file.write_text(yaml_content)
 
-        with pytest.raises(ManifestValidationError, match="Manifest 'clusters' must be a list"):
+        with pytest.raises(
+            ManifestValidationError, match="Manifest 'clusters' must be a list"
+        ):
             load_manifest(str(manifest_file))
 
     def test_load_manifest_missing_name(self, tmp_path):
@@ -115,7 +121,9 @@ clusters:
         manifest_file = tmp_path / "invalid.yaml"
         manifest_file.write_text(yaml_content)
 
-        with pytest.raises(ManifestValidationError, match="Cluster 0 missing required 'name' field"):
+        with pytest.raises(
+            ManifestValidationError, match="Cluster 0 missing required 'name' field"
+        ):
             load_manifest(str(manifest_file))
 
     def test_load_manifest_missing_provider(self, tmp_path):
@@ -127,7 +135,9 @@ clusters:
         manifest_file = tmp_path / "invalid.yaml"
         manifest_file.write_text(yaml_content)
 
-        with pytest.raises(ManifestValidationError, match="Cluster 0 missing required 'provider' field"):
+        with pytest.raises(
+            ManifestValidationError, match="Cluster 0 missing required 'provider' field"
+        ):
             load_manifest(str(manifest_file))
 
     def test_load_manifest_invalid_provider(self, tmp_path):
@@ -140,7 +150,9 @@ clusters:
         manifest_file = tmp_path / "invalid.yaml"
         manifest_file.write_text(yaml_content)
 
-        with pytest.raises(ManifestValidationError, match="Cluster 0: Unknown provider: invalid-provider"):
+        with pytest.raises(
+            ManifestValidationError, match="Cluster 0: Unknown provider: invalid-provider"
+        ):
             load_manifest(str(manifest_file))
 
     def test_load_manifest_cluster_not_dict(self, tmp_path):
@@ -178,7 +190,9 @@ clusters:
         manifest_file = tmp_path / "invalid.yaml"
         manifest_file.write_text(yaml_content)
 
-        with pytest.raises(ManifestValidationError, match="Cluster 0 'provider' must be a string"):
+        with pytest.raises(
+            ManifestValidationError, match="Cluster 0 'provider' must be a string"
+        ):
             load_manifest(str(manifest_file))
 
     def test_load_manifest_no_yaml_module(self, tmp_path):

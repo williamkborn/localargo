@@ -1,7 +1,9 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+"""Test configuration and global fixtures for localargo tests."""
+
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -32,7 +34,9 @@ def mock_subprocess_run():
                 elif "helm" in cmd[0] and "repo" in cmd and "add" in cmd:
                     result.stdout = ""  # helm repo add doesn't output much
                 elif "helm" in cmd[0] and "repo" in cmd and "update" in cmd:
-                    result.stdout = "Hang tight while we grab the latest from your chart repositories..."
+                    result.stdout = (
+                        "Hang tight while we grab the latest from your chart repositories..."
+                    )
 
         return result
 
@@ -74,3 +78,73 @@ def mock_shutil_which():
 def no_sleep(monkeypatch):
     """Prevent accidental real sleeps during tests."""
     monkeypatch.setattr("time.sleep", lambda *_: None)
+
+
+# Common test utilities for duplicated test patterns
+@pytest.fixture
+def sample_cluster_yaml_content():
+    """Common YAML content for a single test cluster."""
+    return """
+clusters:
+  - name: test-cluster
+    provider: kind
+"""
+
+
+@pytest.fixture
+def sample_multi_cluster_yaml_content():
+    """Common YAML content for multiple test clusters."""
+    return """
+clusters:
+  - name: cluster1
+    provider: kind
+  - name: cluster2
+    provider: k3s
+"""
+
+
+@pytest.fixture
+def create_manifest_file(tmp_path):
+    """Create a temporary manifest file with sample cluster YAML."""
+    default_content = """
+clusters:
+  - name: test-cluster
+    provider: kind
+"""
+
+    def _create_file(yaml_content=None, filename="clusters.yaml"):
+        content = yaml_content if yaml_content is not None else default_content
+        manifest_file = tmp_path / filename
+        manifest_file.write_text(content)
+        return manifest_file
+
+    return _create_file
+
+
+@pytest.fixture
+def create_mock_cluster_manager():
+    """Create a mock ClusterManager with common return values."""
+
+    def _create_mock(return_value=None, spec=None):
+        mock_manager = Mock() if spec is None else Mock(spec=spec)
+        if return_value is not None:
+            mock_manager.apply.return_value = return_value
+            mock_manager.delete.return_value = return_value
+            mock_manager.status.return_value = return_value
+        return mock_manager
+
+    return _create_mock
+
+
+@pytest.fixture
+def create_mock_provider():
+    """Create a mock provider with common return values."""
+
+    def _create_mock(name="test-cluster", **kwargs):
+        mock_provider = Mock()
+        mock_provider.name = name
+        for key, value in kwargs.items():
+            setattr(mock_provider, key, value)
+        return mock_provider
+
+    return _create_mock

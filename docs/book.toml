@@ -1,6 +1,6 @@
 [book]
 title = "Localargo Documentation"
-authors = ["U.N. Owen"]
+authors = ["William Born"]
 description = "Documentation for Localargo, a Python CLI tool"
 language = "en"
 
@@ -17,7 +17,7 @@ copy-fonts = true
 additional-css = []
 additional-js = []
 no-section-label = false
-git-repository-url = "https://github.com/U.N. Owen/localargo"
+git-repository-url = "https://github.com/William Born/localargo"
 git-repository-icon = "fa-github"
-edit-url-template = "https://github.com/U.N. Owen/localargo/edit/main/docs/{path}"
+edit-url-template = "https://github.com/William Born/localargo/edit/main/docs/{path}"
 site-url = "/localargo/"

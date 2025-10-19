@@ -1,10 +1,11 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+"""k3s provider implementation."""
+
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import tempfile
 import time
@@ -16,9 +17,31 @@ from localargo.providers.base import (
     ClusterOperationError,
     ClusterProvider,
     ProviderNotAvailableError,
+    check_process_exited_with_error,
 )
+from localargo.utils.cli import check_cli_availability, run_subprocess
 
-"""k3s provider implementation."""
+
+def build_k3s_server_command(kubeconfig_path: str) -> list[str]:
+    """Build the k3s server command with standard options.
+
+    Args:
+        kubeconfig_path (str): Path where kubeconfig should be written
+
+    Returns:
+        list[str]: k3s server command as list of strings
+    """
+    return [
+        "k3s",
+        "server",
+        "--cluster-init",  # Enable clustering
+        "--disable",
+        "traefik",  # Disable default ingress
+        "--disable",
+        "servicelb",  # Disable service load balancer
+        "--write-kubeconfig",
+        kubeconfig_path,
+    ]
 
 
 class K3sProvider(ClusterProvider):
@@ -27,7 +50,7 @@ class K3sProvider(ClusterProvider):
     def __init__(self, name: str = "localargo"):
         super().__init__(name)
         # Use secure temp file for kubeconfig
-        temp_fd, temp_path = tempfile.mkstemp(suffix=".yaml")
+        _, temp_path = tempfile.mkstemp(suffix=".yaml")
         self._kubeconfig_path = temp_path
 
     @property
@@ -37,10 +60,12 @@ class K3sProvider(ClusterProvider):
     def is_available(self) -> bool:
         """Check if k3s is installed and available."""
         try:
-            k3s_path = shutil.which("k3s")
-            if k3s_path is None:
+            k3s_path = check_cli_availability("k3s")
+            if not k3s_path:
                 return False
-            result = subprocess.run([k3s_path, "--version"], capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                [k3s_path, "--version"], capture_output=True, text=True, check=True
+            )
             return "k3s" in result.stdout.lower()
         except (subprocess.CalledProcessError, FileNotFoundError, RuntimeError):
             return False
@@ -58,19 +83,12 @@ class K3sProvider(ClusterProvider):
             env["K3S_CLUSTER_NAME"] = self.name
 
             # Start k3s server in background
-            cmd = [
-                "k3s",
-                "server",
-                "--cluster-init",  # Enable clustering
-                "--disable",
-                "traefik",  # Disable default ingress
-                "--disable",
-                "servicelb",  # Disable service load balancer
-                "--write-kubeconfig",
-                self._kubeconfig_path,
-            ]
+            cmd = build_k3s_server_command(self._kubeconfig_path)
 
-            process = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Start k3s server in background - process must persist beyond this method
+            process = subprocess.Popen(  # pylint: disable=consider-using-with
+                cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
 
             # Wait for cluster to be ready
             self._wait_for_cluster_ready(process)
@@ -84,8 +102,8 @@ class K3sProvider(ClusterProvider):
         except Exception as e:
             msg = f"Unexpected error creating k3s cluster: {e}"
             raise ClusterCreationError(msg) from e
-        else:
-            return True
+
+        return True
 
     def delete_cluster(self, name: str | None = None) -> bool:
         """Delete a k3s cluster."""
@@ -118,41 +136,38 @@ class K3sProvider(ClusterProvider):
 
             # Check if cluster is accessible
             try:
-                kubectl_path = shutil.which("kubectl")
-                if kubectl_path is None:
-                    msg = "kubectl not found in PATH. Please ensure kubectl is installed and available."
-                    raise RuntimeError(msg)
-                subprocess.run([kubectl_path, "--kubeconfig", str(kubeconfig), "cluster-info"], check=True)
+                run_subprocess(["kubectl", "--kubeconfig", str(kubeconfig), "cluster-info"])
                 status["ready"] = True
             except subprocess.CalledProcessError:
                 pass
 
         return status
 
-    def _wait_for_cluster_ready(self, process: subprocess.Popen, timeout: int = 60) -> None:
+    def _wait_for_cluster_ready(
+        self, context_name: str | subprocess.Popen, timeout: int = 60
+    ) -> None:
         """Wait for the k3s cluster to be ready."""
+        # k3s implementation expects a process, not a context name
+        if isinstance(context_name, str):
+            msg = "k3s provider expects a process object, not a context name"
+            raise TypeError(msg)
+
         start_time = time.time()
 
         while time.time() - start_time < timeout:
-            if process.poll() is not None:
-                # Process has exited
-                if process.returncode != 0:
-                    msg = "k3s server process exited with error"
-                    raise ClusterCreationError(msg)
+            check_process_exited_with_error(
+                context_name, error_msg="k3s server process exited with error"
+            )
+            if context_name.poll() is not None:
+                # Process has exited successfully
                 break
 
             # Check if kubeconfig is ready and cluster is accessible
             kubeconfig = Path(self._kubeconfig_path)
             if kubeconfig.exists():
                 try:
-                    kubectl_path = shutil.which("kubectl")
-                    if kubectl_path is None:
-                        msg = "kubectl not found in PATH. Please ensure kubectl is installed and available."
-                    raise RuntimeError(msg)
-                    subprocess.run(
-                        [kubectl_path, "--kubeconfig", str(kubeconfig), "cluster-info"],
-                        capture_output=True,
-                        check=True,
+                    run_subprocess(
+                        ["kubectl", "--kubeconfig", str(kubeconfig), "cluster-info"]
                     )
                 except subprocess.CalledProcessError:
                     pass
@@ -161,8 +176,8 @@ class K3sProvider(ClusterProvider):
 
             time.sleep(2)
 
-        if process.poll() is None:
-            process.terminate()
+        if context_name.poll() is None:
+            context_name.terminate()
         msg = f"k3s cluster '{self.name}' failed to become ready within {timeout} seconds"
         raise ClusterCreationError(msg)
 
@@ -170,13 +185,8 @@ class K3sProvider(ClusterProvider):
         """Configure kubectl context for the k3s cluster."""
         try:
             # Rename the default context to our cluster name
-            kubectl_path = shutil.which("kubectl")
-            if kubectl_path is None:
-                msg = "kubectl not found in PATH. Please ensure kubectl is installed and available."
-                raise RuntimeError(msg)
-            subprocess.run(
+            self._run_kubectl_command(
                 [
-                    kubectl_path,
                     "config",
                     "--kubeconfig",
                     self._kubeconfig_path,

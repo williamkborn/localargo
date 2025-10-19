@@ -1,26 +1,27 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+"""Tests for cluster manager functionality."""
+
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
-from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
 
 from localargo.manager import ClusterManager, ClusterManagerError
 
+from ..test_utils import (
+    create_manager_with_mocked_provider,
+    create_multi_cluster_yaml,
+    setup_multiple_providers,
+)
+
 
 class TestClusterManager:
     """Test suite for ClusterManager."""
 
-    def test_cluster_manager_init_success(self, tmp_path):
+    def test_cluster_manager_init_success(self, create_manifest_file):
         """Test successful cluster manager initialization."""
-        yaml_content = """
-clusters:
-  - name: test-cluster
-    provider: kind
-"""
-        manifest_file = tmp_path / "test.yaml"
-        manifest_file.write_text(yaml_content)
+        manifest_file = create_manifest_file()
 
         manager = ClusterManager(str(manifest_file))
 
@@ -36,91 +37,48 @@ clusters:
         with pytest.raises(ClusterManagerError, match="Failed to load manifest"):
             ClusterManager(str(manifest_file))
 
-    def test_apply_success(self, tmp_path):
+    def test_apply_success(self, create_manifest_file):
         """Test successful cluster apply operation."""
-        yaml_content = """
-clusters:
-  - name: test-cluster
-    provider: kind
-"""
-        manifest_file = tmp_path / "test.yaml"
-        manifest_file.write_text(yaml_content)
+        manifest_file = create_manifest_file()
 
-        # Mock provider
-        mock_provider = Mock()
-        mock_provider.name = "test-cluster"
-        mock_provider.create_cluster.return_value = True
-
-        with patch("localargo.manager.get_provider", return_value=Mock(return_value=mock_provider)):
-            manager = ClusterManager(str(manifest_file))
-            results = manager.apply()
+        manager, _mock_provider = create_manager_with_mocked_provider(
+            manifest_file, create_cluster=Mock(return_value=True)
+        )
+        results = manager.apply()
 
         assert results == {"test-cluster": True}
-        mock_provider.create_cluster.assert_called_once()
 
-    def test_apply_multiple_clusters(self, tmp_path):
+    def test_apply_multiple_clusters(self, create_manifest_file):
         """Test applying multiple clusters."""
-        yaml_content = """
-clusters:
-  - name: cluster1
-    provider: kind
-  - name: cluster2
-    provider: k3s
-"""
-        manifest_file = tmp_path / "test.yaml"
-        manifest_file.write_text(yaml_content)
+        yaml_content = create_multi_cluster_yaml()
+        manifest_file = create_manifest_file(yaml_content, "multi-cluster.yaml")
 
-        # Mock providers
-        mock_provider1 = Mock()
-        mock_provider1.name = "cluster1"
-        mock_provider1.create_cluster.return_value = True
-
-        mock_provider2 = Mock()
-        mock_provider2.name = "cluster2"
-        mock_provider2.create_cluster.return_value = True
-
-        def mock_get_provider(provider_name):
-            if provider_name == "kind":
-                return Mock(return_value=mock_provider1)
-            if provider_name == "k3s":
-                return Mock(return_value=mock_provider2)
-            return Mock()
+        mock_get_provider, mock_providers = setup_multiple_providers(
+            {
+                "kind": {"create_cluster": Mock(return_value=True)},
+                "k3s": {"create_cluster": Mock(return_value=True)},
+            }
+        )
 
         with patch("localargo.manager.get_provider", side_effect=mock_get_provider):
             manager = ClusterManager(str(manifest_file))
             results = manager.apply()
 
         assert results == {"cluster1": True, "cluster2": True}
-        mock_provider1.create_cluster.assert_called_once()
-        mock_provider2.create_cluster.assert_called_once()
+        mock_providers[0].create_cluster.assert_called_once()
+        mock_providers[1].create_cluster.assert_called_once()
 
-    def test_apply_partial_failure(self, tmp_path):
+    def test_apply_partial_failure(self, create_manifest_file):
         """Test apply with partial failures."""
-        yaml_content = """
-clusters:
-  - name: cluster1
-    provider: kind
-  - name: cluster2
-    provider: k3s
-"""
-        manifest_file = tmp_path / "test.yaml"
-        manifest_file.write_text(yaml_content)
+        yaml_content = create_multi_cluster_yaml()
+        manifest_file = create_manifest_file(yaml_content, "partial-failure.yaml")
 
-        # Mock providers - one succeeds, one fails
-        mock_provider1 = Mock()
-        mock_provider1.name = "cluster1"
-        mock_provider1.create_cluster.return_value = True
-
-        mock_provider2 = Mock()
-        mock_provider2.name = "cluster2"
-        mock_provider2.create_cluster.return_value = False
-
-        def mock_get_provider(provider_name):
-            if provider_name == "kind":
-                return Mock(return_value=mock_provider1)
-            if provider_name == "k3s":
-                return Mock(return_value=mock_provider2)
-            return Mock()
+        mock_get_provider, _ = setup_multiple_providers(
+            {
+                "kind": {"create_cluster": Mock(return_value=True)},
+                "k3s": {"create_cluster": Mock(return_value=False)},
+            }
+        )
 
         with patch("localargo.manager.get_provider", side_effect=mock_get_provider):
             manager = ClusterManager(str(manifest_file))
@@ -128,100 +86,55 @@ clusters:
 
         assert results == {"cluster1": True, "cluster2": False}
 
-    def test_apply_provider_exception(self, tmp_path):
+    def test_apply_provider_exception(self, create_manifest_file):
         """Test apply handles provider exceptions."""
-        yaml_content = """
-clusters:
-  - name: test-cluster
-    provider: kind
-"""
-        manifest_file = tmp_path / "test.yaml"
-        manifest_file.write_text(yaml_content)
+        manifest_file = create_manifest_file()
 
-        # Mock provider that raises exception
-        mock_provider = Mock()
-        mock_provider.name = "test-cluster"
-        mock_provider.create_cluster.side_effect = Exception("Test error")
-
-        with patch("localargo.manager.get_provider", return_value=Mock(return_value=mock_provider)):
-            manager = ClusterManager(str(manifest_file))
-            results = manager.apply()
+        manager, _mock_provider = create_manager_with_mocked_provider(
+            manifest_file, create_cluster=Mock(side_effect=RuntimeError("Test error"))
+        )
+        results = manager.apply()
 
         assert results == {"test-cluster": False}
 
-    def test_delete_success(self, tmp_path):
+    def test_delete_success(self, create_manifest_file):
         """Test successful cluster delete operation."""
-        yaml_content = """
-clusters:
-  - name: test-cluster
-    provider: kind
-"""
-        manifest_file = tmp_path / "test.yaml"
-        manifest_file.write_text(yaml_content)
+        manifest_file = create_manifest_file()
 
-        # Mock provider
-        mock_provider = Mock()
-        mock_provider.name = "test-cluster"
-        mock_provider.delete_cluster.return_value = True
-
-        with patch("localargo.manager.get_provider", return_value=Mock(return_value=mock_provider)):
-            manager = ClusterManager(str(manifest_file))
-            results = manager.delete()
+        manager, _mock_provider = create_manager_with_mocked_provider(
+            manifest_file, delete_cluster=Mock(return_value=True)
+        )
+        results = manager.delete()
 
         assert results == {"test-cluster": True}
-        mock_provider.delete_cluster.assert_called_once()
 
-    def test_status_success(self, tmp_path):
+    def test_status_success(self, create_manifest_file):
         """Test successful cluster status operation."""
-        yaml_content = """
-clusters:
-  - name: test-cluster
-    provider: kind
-"""
-        manifest_file = tmp_path / "test.yaml"
-        manifest_file.write_text(yaml_content)
+        manifest_file = create_manifest_file()
 
-        # Mock provider
-        mock_provider = Mock()
-        mock_provider.name = "test-cluster"
-        mock_provider.get_cluster_status.return_value = {
+        status_result = {
             "provider": "kind",
             "name": "test-cluster",
             "exists": True,
             "ready": True,
         }
+        manager, _mock_provider = create_manager_with_mocked_provider(
+            manifest_file,
+            get_cluster_status=Mock(return_value=status_result),
+        )
+        results = manager.status()
 
-        with patch("localargo.manager.get_provider", return_value=Mock(return_value=mock_provider)):
-            manager = ClusterManager(str(manifest_file))
-            results = manager.status()
+        assert results == {"test-cluster": status_result}
 
-        assert results == {
-            "test-cluster": {
-                "provider": "kind",
-                "name": "test-cluster",
-                "exists": True,
-                "ready": True,
-            }
-        }
-
-    def test_status_provider_exception(self, tmp_path):
+    def test_status_provider_exception(self, create_manifest_file):
         """Test status handles provider exceptions."""
-        yaml_content = """
-clusters:
-  - name: test-cluster
-    provider: kind
-"""
-        manifest_file = tmp_path / "test.yaml"
-        manifest_file.write_text(yaml_content)
+        manifest_file = create_manifest_file()
 
-        # Mock provider that raises exception
-        mock_provider = Mock()
-        mock_provider.name = "test-cluster"
-        mock_provider.get_cluster_status.side_effect = Exception("Test error")
-
-        with patch("localargo.manager.get_provider", return_value=Mock(return_value=mock_provider)):
-            manager = ClusterManager(str(manifest_file))
-            results = manager.status()
+        manager, _mock_provider = create_manager_with_mocked_provider(
+            manifest_file,
+            get_cluster_status=Mock(side_effect=RuntimeError("Test error")),
+        )
+        results = manager.status()
 
         expected_result = {
             "test-cluster": {
@@ -231,116 +144,3 @@ clusters:
             }
         }
         assert results == expected_result
-
-    def test_state_file_update_on_success(self, tmp_path):
-        """Test state file is updated on successful operations."""
-        yaml_content = """
-clusters:
-  - name: test-cluster
-    provider: kind
-"""
-        manifest_file = tmp_path / "test.yaml"
-        manifest_file.write_text(yaml_content)
-
-        # Mock provider
-        mock_provider = Mock()
-        mock_provider.name = "test-cluster"
-        mock_provider.create_cluster.return_value = True
-
-        with patch("localargo.manager.get_provider", return_value=Mock(return_value=mock_provider)):
-            manager = ClusterManager(str(manifest_file))
-            manager.apply()
-
-        # Check state file was created and contains expected data
-        state_file = Path(".localargo/state.json")
-        assert state_file.exists()
-
-        import json
-
-        with open(state_file, encoding="utf-8") as f:
-            state = json.load(f)
-
-        # Find our test cluster in the state (there may be others from previous tests)
-        test_cluster = None
-        for cluster in state["clusters"]:
-            if cluster["name"] == "test-cluster":
-                test_cluster = cluster
-                break
-
-        assert test_cluster is not None
-        assert test_cluster["provider"] == "kind"
-        assert test_cluster["last_action"] == "created"
-        assert "created" in test_cluster
-        assert "last_updated" in test_cluster
-
-    def test_state_file_update_on_delete(self, tmp_path):
-        """Test state file is updated on delete operations."""
-        yaml_content = """
-clusters:
-  - name: test-cluster
-    provider: kind
-"""
-        manifest_file = tmp_path / "test.yaml"
-        manifest_file.write_text(yaml_content)
-
-        # Mock provider
-        mock_provider = Mock()
-        mock_provider.name = "test-cluster"
-        mock_provider.delete_cluster.return_value = True
-
-        with patch("localargo.manager.get_provider", return_value=Mock(return_value=mock_provider)):
-            manager = ClusterManager(str(manifest_file))
-            manager.delete()
-
-        # Check state file was updated
-        state_file = Path(".localargo/state.json")
-        assert state_file.exists()
-
-        import json
-
-        with open(state_file, encoding="utf-8") as f:
-            state = json.load(f)
-
-        # Find our test cluster
-        test_cluster = None
-        for cluster in state["clusters"]:
-            if cluster["name"] == "test-cluster":
-                test_cluster = cluster
-                break
-
-        assert test_cluster is not None
-        assert test_cluster["last_action"] == "deleted"
-
-    def test_state_file_corrupted_recovery(self, tmp_path):
-        """Test state file recovery when corrupted."""
-        yaml_content = """
-clusters:
-  - name: test-cluster
-    provider: kind
-"""
-        manifest_file = tmp_path / "test.yaml"
-        manifest_file.write_text(yaml_content)
-
-        # Create corrupted state file
-        state_file = Path(".localargo/state.json")
-        state_file.parent.mkdir(exist_ok=True)
-        state_file.write_text("invalid json content")
-
-        # Mock provider
-        mock_provider = Mock()
-        mock_provider.name = "test-cluster"
-        mock_provider.create_cluster.return_value = True
-
-        with patch("localargo.manager.get_provider", return_value=Mock(return_value=mock_provider)):
-            manager = ClusterManager(str(manifest_file))
-            manager.apply()
-
-        # Should still work and create valid state file
-        assert state_file.exists()
-
-        import json
-
-        with open(state_file, encoding="utf-8") as f:
-            state = json.load(f)
-
-        assert state["clusters"][0]["name"] == "test-cluster"

@@ -47,7 +47,7 @@ Ready to get started? Check out the [Installation](installation.md) and [Usage](
 
 Need help or want to contribute?
 
-- 📖 [Documentation](https://github.com/U.N. Owen/localargo#readme)
-- 🐛 [Report Issues](https://github.com/U.N. Owen/localargo/issues)
-- 💻 [Source Code](https://github.com/U.N. Owen/localargo)
-- 💬 [Discussions](https://github.com/U.N. Owen/localargo/discussions)
+- 📖 [Documentation](https://github.com/William Born/localargo#readme)
+- 🐛 [Report Issues](https://github.com/William Born/localargo/issues)
+- 💻 [Source Code](https://github.com/William Born/localargo)
+- 💬 [Discussions](https://github.com/William Born/localargo/discussions)

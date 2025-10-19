@@ -1,11 +1,18 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+"""Tests for Kind provider functionality."""
+
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+from subprocess import CalledProcessError
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from localargo.providers.base import ClusterCreationError, ClusterOperationError, ProviderNotAvailableError
+from localargo.providers.base import (
+    ClusterCreationError,
+    ClusterOperationError,
+    ProviderNotAvailableError,
+)
 from localargo.providers.kind import KindProvider
 
 
@@ -31,8 +38,6 @@ class TestKindProvider:
 
     def test_is_available_with_kind_command_failure(self, mock_subprocess_run):
         """Test is_available returns False when kind command fails."""
-        from subprocess import CalledProcessError
-
         mock_subprocess_run.side_effect = CalledProcessError(1, "kind")
 
         provider = KindProvider(name="test")
@@ -48,7 +53,10 @@ class TestKindProvider:
                 "helm": "/usr/local/bin/helm",
             }.get(cmd)
 
-        with patch("shutil.which", side_effect=mock_which), patch("subprocess.run") as mock_run:
+        with (
+            patch("shutil.which", side_effect=mock_which),
+            patch("subprocess.run") as mock_run,
+        ):
             mock_run.return_value.stdout = "kind v0.20.0"
             provider = KindProvider(name="test")
             assert provider.is_available() is False
@@ -63,7 +71,10 @@ class TestKindProvider:
                 "helm": None,
             }.get(cmd)
 
-        with patch("shutil.which", side_effect=mock_which), patch("subprocess.run") as mock_run:
+        with (
+            patch("shutil.which", side_effect=mock_which),
+            patch("subprocess.run") as mock_run,
+        ):
             mock_run.return_value.stdout = "kind v0.20.0"
             provider = KindProvider(name="test")
             assert provider.is_available() is False
@@ -73,9 +84,11 @@ class TestKindProvider:
         provider = KindProvider(name="demo")
 
         # Mock the installation methods
-        with patch.object(provider, "_wait_for_cluster_ready"), patch.object(
-            provider, "_install_nginx_ingress"
-        ), patch.object(provider, "_install_argocd"):
+        with (
+            patch.object(provider, "_wait_for_cluster_ready"),
+            patch.object(provider, "_install_nginx_ingress"),
+            patch.object(provider, "_install_argocd"),
+        ):
             result = provider.create_cluster()
 
             assert result is True
@@ -97,18 +110,20 @@ class TestKindProvider:
         with patch("shutil.which", return_value=None):
             provider = KindProvider(name="demo")
 
-            with pytest.raises(ProviderNotAvailableError, match="KinD, kubectl, and helm are required"):
+            with pytest.raises(
+                ProviderNotAvailableError, match="KinD, kubectl, and helm are required"
+            ):
                 provider.create_cluster()
 
     def test_create_cluster_command_failure_raises_error(self):
         """Test create_cluster raises ClusterCreationError when command fails."""
-        from subprocess import CalledProcessError
-
         provider = KindProvider(name="demo")
 
-        with patch.object(provider, "is_available", return_value=True), patch(
-            "subprocess.run", side_effect=CalledProcessError(1, "kind")
-        ), pytest.raises(ClusterCreationError, match="Failed to create KinD cluster"):
+        with (
+            patch.object(provider, "is_available", return_value=True),
+            patch("subprocess.run", side_effect=CalledProcessError(1, "kind")),
+            pytest.raises(ClusterCreationError, match="Failed to create KinD cluster"),
+        ):
             provider.create_cluster()
 
     def test_delete_cluster_success(self, mock_subprocess_run):
@@ -120,7 +135,9 @@ class TestKindProvider:
         assert result is True
 
         # Verify the delete command
-        mock_subprocess_run.assert_called_once_with(["kind", "delete", "cluster", "--name", "demo"], check=True)
+        mock_subprocess_run.assert_called_once_with(
+            ["kind", "delete", "cluster", "--name", "demo"], check=True
+        )
 
     def test_delete_cluster_with_custom_name(self, mock_subprocess_run):
         """Test cluster deletion with custom cluster name."""
@@ -137,23 +154,23 @@ class TestKindProvider:
 
     def test_delete_cluster_command_failure_raises_error(self, mock_subprocess_run):
         """Test delete_cluster raises ClusterOperationError when command fails."""
-        from subprocess import CalledProcessError
-
         mock_subprocess_run.side_effect = CalledProcessError(1, "kind")
 
         provider = KindProvider(name="demo")
 
-        with pytest.raises(ClusterOperationError, match="Failed to delete KinD cluster 'demo'"):
+        with pytest.raises(
+            ClusterOperationError, match="Failed to delete KinD cluster 'demo'"
+        ):
             provider.delete_cluster()
 
     def test_delete_cluster_invokes_correct_command_explicit_patch(self):
         """Test delete_cluster invokes correct command using explicit module patching."""
-        from unittest.mock import patch
-
         with patch("localargo.providers.kind.subprocess.run") as mock_run:
             provider = KindProvider("demo")
             provider.delete_cluster()
-            mock_run.assert_called_once_with(["kind", "delete", "cluster", "--name", "demo"], check=True)
+            mock_run.assert_called_once_with(
+                ["kind", "delete", "cluster", "--name", "demo"], check=True
+            )
 
     def test_get_context_name(self):
         """Test get_context_name returns correct context name format."""
@@ -235,11 +252,10 @@ class TestKindProvider:
 
     def test_get_cluster_status_command_failure_raises_error(self):
         """Test get_cluster_status raises ClusterOperationError when command fails."""
-        from subprocess import CalledProcessError
-
         provider = KindProvider(name="demo")
 
-        with patch("subprocess.run", side_effect=CalledProcessError(1, "kind")), pytest.raises(
-            ClusterOperationError, match="Failed to get cluster status"
+        with (
+            patch("subprocess.run", side_effect=CalledProcessError(1, "kind")),
+            pytest.raises(ClusterOperationError, match="Failed to get cluster status"),
         ):
             provider.get_cluster_status()

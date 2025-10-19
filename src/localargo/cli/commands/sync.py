@@ -1,20 +1,33 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
+#
+# SPDX-License-Identifier: MIT
+"""Sync ArgoCD applications and local directories.
+
+This module provides commands for syncing ArgoCD applications with local directories
+and watching for changes to automatically sync.
+"""
+
 from __future__ import annotations
 
-import shutil
 import subprocess
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-#
-# SPDX-License-Identifier: MIT
+try:
+    from watchdog.events import FileSystemEventHandler
+    from watchdog.observers import Observer
+except ImportError:
+    FileSystemEventHandler = None
+    Observer = None
+
 import click
+
+from localargo.logging import logger
+from localargo.utils.cli import run_subprocess
 
 if TYPE_CHECKING:
     from watchdog.events import FileSystemEvent
-
-from localargo.logging import logger
 
 # Constants
 SYNC_DEBOUNCE_SECONDS = 2
@@ -26,7 +39,9 @@ SYNC_DEBOUNCE_SECONDS = 2
 @click.option("--app", "-a", help="Specific ArgoCD application to sync")
 @click.option("--sync-all", is_flag=True, help="Sync all applications")
 @click.option("--force", "-f", is_flag=True, help="Force sync even if no changes")
-def sync_cmd(*, watch: bool, path: str | None, app: str | None, sync_all: bool, force: bool) -> None:
+def sync_cmd(
+    *, watch: bool, path: str | None, app: str | None, sync_all: bool, force: bool
+) -> None:
     """Sync ArgoCD applications or local directories."""
     if watch and not path and not app:
         logger.error("❌ --watch requires --path or --app")
@@ -51,19 +66,19 @@ def sync_cmd(*, watch: bool, path: str | None, app: str | None, sync_all: bool, 
 def _sync_application(app_name: str, *, force: bool = False) -> None:
     """Sync a specific ArgoCD application."""
     try:
-        logger.info(f"Syncing application '{app_name}'...")
+        logger.info("Syncing application '%s'...", app_name)
 
         cmd = ["argocd", "app", "sync", app_name]
         if force:
             cmd.append("--force")
 
         subprocess.run(cmd, check=True)
-        logger.info(f"✅ Application '{app_name}' synced successfully")
+        logger.info("✅ Application '%s' synced successfully", app_name)
 
     except FileNotFoundError:
         logger.error("❌ argocd CLI not found")
     except subprocess.CalledProcessError as e:
-        logger.info(f"❌ Error syncing application: {e}")
+        logger.info("❌ Error syncing application: %s", e)
 
 
 def _sync_all_applications(*, force: bool = False) -> None:
@@ -72,11 +87,7 @@ def _sync_all_applications(*, force: bool = False) -> None:
         logger.info("Syncing all applications...")
 
         # Get list of applications
-        argocd_path = shutil.which("argocd")
-        if argocd_path is None:
-            msg = "argocd not found in PATH. Please ensure argocd CLI is installed and available."
-            raise RuntimeError(msg)
-        result = subprocess.run([argocd_path, "app", "list", "-o", "name"], capture_output=True, text=True, check=True)
+        result = run_subprocess(["argocd", "app", "list", "-o", "name"])
 
         apps = [app.strip() for app in result.stdout.strip().split("\n") if app.strip()]
 
@@ -84,25 +95,25 @@ def _sync_all_applications(*, force: bool = False) -> None:
             logger.info("No applications found")
             return
 
-        logger.info(f"Found {len(apps)} applications: {', '.join(apps)}")
+        logger.info("Found %d applications: %s", len(apps), ", ".join(apps))
 
         for app in apps:
             try:
-                logger.info(f"Syncing '{app}'...")
+                logger.info("Syncing '%s'...", app)
                 cmd = ["argocd", "app", "sync", app]
                 if force:
                     cmd.append("--force")
                 subprocess.run(cmd, check=True)
-                logger.info(f"✅ '{app}' synced")
+                logger.info("✅ '%s' synced", app)
             except subprocess.CalledProcessError as e:
-                logger.info(f"❌ Error syncing '{app}': {e}")
+                logger.info("❌ Error syncing '%s': %s", app, e)
 
         logger.info("✅ All applications sync completed")
 
     except FileNotFoundError:
         logger.error("❌ argocd CLI not found")
     except subprocess.CalledProcessError as e:
-        logger.info(f"❌ Error listing applications: {e}")
+        logger.info("❌ Error listing applications: %s", e)
 
 
 def _sync_directory(path: str) -> None:
@@ -110,14 +121,14 @@ def _sync_directory(path: str) -> None:
     path_obj = Path(path)
 
     if not path_obj.exists():
-        logger.info(f"❌ Path does not exist: {path}")
+        logger.info("❌ Path does not exist: %s", path)
         return
 
     if not path_obj.is_dir():
-        logger.info(f"❌ Path is not a directory: {path}")
+        logger.info("❌ Path is not a directory: %s", path)
         return
 
-    logger.info(f"Directory sync for '{path}' not yet implemented")
+    logger.info("Directory sync for '%s' not yet implemented", path)
     logger.info("This would integrate with GitOps workflows in the future")
 
 
@@ -131,32 +142,42 @@ def _sync_watch(path: str | None = None, app: str | None = None) -> None:
 
 def _watch_directory(path: str) -> None:
     """Watch a directory for changes and sync."""
-    try:
-        from watchdog.events import FileSystemEventHandler
-        from watchdog.observers import Observer
-    except ImportError:
-        logger.error("❌ watchdog package required for watching. Install with: pip install watchdog")
+    if FileSystemEventHandler is None or Observer is None:
+        logger.error(
+            "❌ watchdog package required for watching. Install with: pip install watchdog"
+        )
         return
 
     path_obj = Path(path)
     if not path_obj.exists():
-        logger.info(f"❌ Path does not exist: {path}")
+        logger.info("❌ Path does not exist: %s", path)
         return
 
     class ChangeHandler(FileSystemEventHandler):
+        """Handler for file system events during directory watching.
+
+        Initializes the change handler with last sync timestamp.
+        """
+
         def __init__(self) -> None:
             self.last_sync = 0.0
 
+        @property
+        def is_ready(self) -> bool:
+            """Check if handler is ready for sync operations."""
+            return time.time() - self.last_sync > SYNC_DEBOUNCE_SECONDS
+
         def on_any_event(self, event: FileSystemEvent) -> None:
+            """Handle file system events."""
             # Debounce syncs
             current_time = time.time()
             if current_time - self.last_sync > SYNC_DEBOUNCE_SECONDS:
-                logger.info(f"📁 Change detected: {event.src_path}")
+                logger.info("📁 Change detected: %s", event.src_path)
                 # Here you would trigger a sync
                 logger.info("🔄 Auto-sync not yet implemented")
                 self.last_sync = current_time
 
-    logger.info(f"👀 Watching directory: {path}")
+    logger.info("👀 Watching directory: %s", path)
     logger.info("Press Ctrl+C to stop watching")
 
     observer = Observer()
@@ -173,7 +194,7 @@ def _watch_directory(path: str) -> None:
 def _watch_application(app_name: str) -> None:
     """Watch an ArgoCD application for changes."""
     try:
-        logger.info(f"👀 Watching application: {app_name}")
+        logger.info("👀 Watching application: %s", app_name)
         logger.info("Press Ctrl+C to stop watching")
 
         # Use argocd app wait to watch for changes
@@ -182,9 +203,9 @@ def _watch_application(app_name: str) -> None:
         try:
             subprocess.run(cmd, check=True)
         except KeyboardInterrupt:
-            logger.info(f"\n✅ Stopped watching application '{app_name}'")
+            logger.info("\n✅ Stopped watching application '%s'", app_name)
 
     except FileNotFoundError:
         logger.error("❌ argocd CLI not found")
     except subprocess.CalledProcessError as e:
-        logger.info(f"❌ Error watching application: {e}")
+        logger.info("❌ Error watching application: %s", e)

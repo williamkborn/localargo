@@ -9,6 +9,7 @@ python = "3.12"
 kind = "latest"
 kubectl = "latest"
 argocd = "latest"
+helm = "latest"
 
 # Python project management
 hatch = "latest"
@@ -38,6 +39,8 @@ run = "git clean -fdX"
 description = "Run formatting, typecheck, and tests before commit"
 run = [
   "hatch fmt",
+  "hatch run pydoclint",
+  "hatch run pylint",
   "hatch run typecheck",
   "hatch run test"
 ]

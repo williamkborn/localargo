@@ -1,14 +1,19 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
-from __future__ import annotations
-
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
-import shutil
+"""Application management for ArgoCD.
+
+This module provides commands for managing ArgoCD applications.
+"""
+
+from __future__ import annotations
+
 import subprocess
 
 import click
 
 from localargo.logging import logger
+from localargo.utils.cli import ensure_argocd_available
 
 
 @click.group()
@@ -20,19 +25,25 @@ def app() -> None:
 @click.argument("name")
 @click.option("--repo", "-r", required=True, help="Git repository URL")
 @click.option("--path", "-p", default=".", help="Path within repository")
-@click.option("--dest-server", default="https://kubernetes.default.svc", help="Destination server")
+@click.option(
+    "--dest-server", default="https://kubernetes.default.svc", help="Destination server"
+)
 @click.option("--dest-namespace", default="default", help="Destination namespace")
 @click.option("--project", default="default", help="ArgoCD project")
 @click.option("--create-namespace", is_flag=True, help="Create namespace if it doesn't exist")
-def create(
-    name: str, repo: str, path: str, dest_server: str, dest_namespace: str, project: str, *, create_namespace: bool
+def create(  # pylint: disable=too-many-arguments
+    name: str,
+    repo: str,
+    *,
+    path: str,
+    dest_server: str,
+    dest_namespace: str,
+    project: str,
+    create_namespace: bool,
 ) -> None:
     """Create a new ArgoCD application."""
     # Check if argocd CLI is available
-    argocd_path = shutil.which("argocd")
-    if not argocd_path:
-        msg = "argocd CLI not found"
-        raise FileNotFoundError(msg)
+    argocd_path = ensure_argocd_available()
 
     try:
         subprocess.run([argocd_path, "--version"], capture_output=True, check=True)
@@ -59,20 +70,22 @@ def create(
             cmd.extend(["--create-namespace"])
 
         subprocess.run(cmd, check=True)
-        logger.info(f"✅ Application '{name}' created successfully")
+        logger.info("✅ Application '%s' created successfully", name)
 
         # Optionally sync immediately
         if click.confirm("Would you like to sync the application now?"):
             subprocess.run([argocd_path, "app", "sync", name], check=True)
-            logger.info(f"✅ Application '{name}' synced")
+            logger.info("✅ Application '%s' synced", name)
 
     except FileNotFoundError:
         logger.error(
-            "❌ argocd CLI not found. Install from: https://argo-cd.readthedocs.io/en/stable/cli_installation/"
+            "❌ argocd CLI not found. Install from: "
+            "https://argo-cd.readthedocs.io/en/stable/cli_installation"
         )
     except subprocess.CalledProcessError as e:
         logger.info(
-            f"❌ Error creating application: {e}",
+            "❌ Error creating application: %s",
+            e,
         )
 
 
@@ -87,13 +100,14 @@ def sync(name: str, *, watch: bool) -> None:
             cmd.append("--watch")
 
         subprocess.run(cmd, check=True)
-        logger.info(f"✅ Application '{name}' sync completed")
+        logger.info("✅ Application '%s' sync completed", name)
 
     except FileNotFoundError:
         logger.error("❌ argocd CLI not found")
     except subprocess.CalledProcessError as e:
         logger.info(
-            f"❌ Error syncing application: {e}",
+            "❌ Error syncing application: %s",
+            e,
         )
 
 
@@ -102,27 +116,26 @@ def sync(name: str, *, watch: bool) -> None:
 def status(name: str | None) -> None:
     """Show application status."""
     # Check if argocd CLI is available
-    argocd_path = shutil.which("argocd")
-    if not argocd_path:
-        msg = "argocd CLI not found"
-        raise FileNotFoundError(msg)
+    argocd_path = ensure_argocd_available()
 
     try:
         if name:
             # Show specific app status
-            result = subprocess.run([argocd_path, "app", "get", name], capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                [argocd_path, "app", "get", name], capture_output=True, text=True, check=True
+            )
             logger.info(result.stdout)
         else:
             # Show all apps
-            result = subprocess.run([argocd_path, "app", "list"], capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                [argocd_path, "app", "list"], capture_output=True, text=True, check=True
+            )
             logger.info(result.stdout)
 
     except FileNotFoundError:
         logger.error("❌ argocd CLI not found")
-    except subprocess.CalledProcessError as e:
-        logger.info(
-            f"❌ Error getting status: {e}",
-        )
+    except subprocess.CalledProcessError:
+        logger.info("❌ Error getting status")
 
 
 @app.command()
@@ -130,33 +143,27 @@ def status(name: str | None) -> None:
 def delete(name: str) -> None:
     """Delete an ArgoCD application."""
     # Check if argocd CLI is available
-    argocd_path = shutil.which("argocd")
-    if not argocd_path:
-        msg = "argocd CLI not found"
-        raise FileNotFoundError(msg)
+    argocd_path = ensure_argocd_available()
 
     if click.confirm(f"Are you sure you want to delete application '{name}'?"):
         try:
             subprocess.run([argocd_path, "app", "delete", name], check=True)
-            logger.info(f"✅ Application '{name}' deleted")
+            logger.info("✅ Application '%s' deleted", name)
         except FileNotFoundError:
             logger.error("❌ argocd CLI not found")
-        except subprocess.CalledProcessError as e:
-            logger.info(
-                f"❌ Error deleting application: {e}",
-            )
+        except subprocess.CalledProcessError:
+            logger.info("❌ Error deleting application")
 
 
 @app.command()
 @click.argument("name")
-@click.option("--local", "-l", type=click.Path(exists=True), help="Local directory to diff against")
+@click.option(
+    "--local", "-l", type=click.Path(exists=True), help="Local directory to diff against"
+)
 def diff(name: str, local: str | None) -> None:
     """Show diff between desired and live state."""
     # Check if argocd CLI is available
-    argocd_path = shutil.which("argocd")
-    if not argocd_path:
-        msg = "argocd CLI not found"
-        raise FileNotFoundError(msg)
+    argocd_path = ensure_argocd_available()
 
     try:
         if local:
@@ -170,7 +177,8 @@ def diff(name: str, local: str | None) -> None:
         logger.error("❌ argocd CLI not found")
     except subprocess.CalledProcessError as e:
         logger.info(
-            f"❌ Error showing diff: {e}",
+            "❌ Error showing diff: %s",
+            e,
         )
 
 
@@ -179,10 +187,7 @@ def diff(name: str, local: str | None) -> None:
 def logs(name: str) -> None:
     """Show application logs."""
     # Check if argocd CLI is available
-    argocd_path = shutil.which("argocd")
-    if not argocd_path:
-        msg = "argocd CLI not found"
-        raise FileNotFoundError(msg)
+    argocd_path = ensure_argocd_available()
 
     try:
         subprocess.run([argocd_path, "app", "logs", name], check=True)
@@ -190,5 +195,6 @@ def logs(name: str) -> None:
         logger.error("❌ argocd CLI not found")
     except subprocess.CalledProcessError as e:
         logger.info(
-            f"❌ Error showing logs: {e}",
+            "❌ Error showing logs: %s",
+            e,
         )

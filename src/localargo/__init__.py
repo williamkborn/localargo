@@ -1,4 +1,6 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+"""Localargo - Local Kubernetes cluster management tool."""
+
 from __future__ import annotations

@@ -1,9 +1,12 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+"""Declarative cluster lifecycle management."""
+
 from __future__ import annotations
 
 import json
+import subprocess
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,13 +19,6 @@ from localargo.providers.registry import get_provider
 if TYPE_CHECKING:
     from localargo.providers.base import ClusterProvider
 
-"""Declarative cluster lifecycle management."""
-
-try:
-    import yaml
-except ImportError:
-    yaml = None  # type: ignore[assignment]
-
 
 class ClusterManagerError(Exception):
     """Base exception for cluster manager errors."""
@@ -34,18 +30,15 @@ class ClusterManager:
 
     Provides unified orchestration for creating, deleting, and managing
     clusters defined in YAML manifests using dynamic provider selection.
+
+    Args:
+        manifest_path (str | Path): Path to cluster manifest file
+
+    Raises:
+        ClusterManagerError: If manifest cannot be loaded
     """
 
     def __init__(self, manifest_path: str | Path):
-        """
-        Initialize cluster manager with manifest.
-
-        Args:
-            manifest_path: Path to cluster manifest file
-
-        Raises:
-            ClusterManagerError: If manifest cannot be loaded
-        """
         try:
             self.manifest = load_manifest(manifest_path)
         except Exception as e:
@@ -64,14 +57,18 @@ class ClusterManager:
         Create all clusters defined in the manifest.
 
         Returns:
-            Dictionary mapping cluster names to success status
+            dict[str, bool]: Dictionary mapping cluster names to success status
         """
         logger.info("Applying cluster manifest...")
         results = {}
 
         for cluster_config in self.manifest.clusters:
             cluster_name = cluster_config.name
-            logger.info(f"Creating cluster '{cluster_name}' with provider '{cluster_config.provider}'")
+            logger.info(
+                "Creating cluster '%s' with provider '%s'",
+                cluster_name,
+                cluster_config.provider,
+            )
 
             try:
                 provider = self.providers[cluster_name]
@@ -79,16 +76,16 @@ class ClusterManager:
                 results[cluster_name] = success
 
                 if success:
-                    logger.info(f"✅ Cluster '{cluster_name}' created successfully")
+                    logger.info("✅ Cluster '%s' created successfully", cluster_name)
                     self._update_state_file(cluster_name, "created", cluster_config.provider)
                 else:
-                    logger.error(f"❌ Failed to create cluster '{cluster_name}'")
+                    logger.error("❌ Failed to create cluster '%s'", cluster_name)
 
             except ProviderError as e:
-                logger.error(f"❌ Error creating cluster '{cluster_name}': {e}")
+                logger.error("❌ Error creating cluster '%s': %s", cluster_name, e)
                 results[cluster_name] = False
-            except Exception as e:  # noqa: BLE001
-                logger.error(f"❌ Unexpected error creating cluster '{cluster_name}': {e}")
+            except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as e:
+                logger.error("❌ System error creating cluster '%s': %s", cluster_name, e)
                 results[cluster_name] = False
 
         return results
@@ -98,14 +95,14 @@ class ClusterManager:
         Delete all clusters defined in the manifest.
 
         Returns:
-            Dictionary mapping cluster names to success status
+            dict[str, bool]: Dictionary mapping cluster names to success status
         """
         logger.info("Deleting clusters from manifest...")
         results = {}
 
         for cluster_config in self.manifest.clusters:
             cluster_name = cluster_config.name
-            logger.info(f"Deleting cluster '{cluster_name}'")
+            logger.info("Deleting cluster '%s'", cluster_name)
 
             try:
                 provider = self.providers[cluster_name]
@@ -113,16 +110,16 @@ class ClusterManager:
                 results[cluster_name] = success
 
                 if success:
-                    logger.info(f"✅ Cluster '{cluster_name}' deleted successfully")
+                    logger.info("✅ Cluster '%s' deleted successfully", cluster_name)
                     self._update_state_file(cluster_name, "deleted", cluster_config.provider)
                 else:
-                    logger.error(f"❌ Failed to delete cluster '{cluster_name}'")
+                    logger.error("❌ Failed to delete cluster '%s'", cluster_name)
 
             except ProviderError as e:
-                logger.error(f"❌ Error deleting cluster '{cluster_name}': {e}")
+                logger.error("❌ Error deleting cluster '%s': %s", cluster_name, e)
                 results[cluster_name] = False
-            except Exception as e:  # noqa: BLE001
-                logger.error(f"❌ Unexpected error deleting cluster '{cluster_name}': {e}")
+            except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as e:
+                logger.error("❌ System error deleting cluster '%s': %s", cluster_name, e)
                 results[cluster_name] = False
 
         return results
@@ -132,7 +129,7 @@ class ClusterManager:
         Get status of all clusters defined in the manifest.
 
         Returns:
-            Dictionary mapping cluster names to status information
+            dict[str, dict[str, Any]]: Dictionary mapping cluster names to status information
         """
         logger.info("Getting cluster status...")
         results = {}
@@ -146,21 +143,23 @@ class ClusterManager:
                 results[cluster_name] = status_info
 
                 if status_info.get("ready", False):
-                    logger.info(f"✅ Cluster '{cluster_name}': ready")
+                    logger.info("✅ Cluster '%s': ready", cluster_name)
                 elif status_info.get("exists", False):
-                    logger.warning(f"⚠️  Cluster '{cluster_name}': exists but not ready")
+                    logger.warning("⚠️  Cluster '%s': exists but not ready", cluster_name)
                 else:
-                    logger.warning(f"❌ Cluster '{cluster_name}': does not exist")
+                    logger.warning("❌ Cluster '%s': does not exist", cluster_name)
 
             except ProviderError as e:
-                logger.error(f"❌ Error getting status for cluster '{cluster_name}': {e}")
+                logger.error("❌ Error getting status for cluster '%s': %s", cluster_name, e)
                 results[cluster_name] = {
                     "error": str(e),
                     "exists": False,
                     "ready": False,
                 }
-            except Exception as e:  # noqa: BLE001
-                logger.error(f"❌ Unexpected error getting status for cluster '{cluster_name}': {e}")
+            except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as e:
+                logger.error(
+                    "❌ System error getting status for cluster '%s': %s", cluster_name, e
+                )
                 results[cluster_name] = {
                     "error": str(e),
                     "exists": False,
@@ -174,9 +173,9 @@ class ClusterManager:
         Update persistent state file with cluster information.
 
         Args:
-            cluster_name: Name of the cluster
-            action: Action performed ('created' or 'deleted')
-            provider: Provider name used
+            cluster_name (str): Name of the cluster
+            action (str): Action performed ('created' or 'deleted')
+            provider (str): Provider name used
         """
         state_file = Path(".localargo") / "state.json"
 

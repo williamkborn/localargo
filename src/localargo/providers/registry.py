@@ -1,6 +1,8 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+"""Provider registry for cluster management."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -11,7 +13,6 @@ from localargo.providers.kind import KindProvider
 if TYPE_CHECKING:
     from localargo.providers.base import ClusterProvider
 
-"""Provider registry for dynamic provider selection."""
 
 # Registry of available providers
 PROVIDERS: dict[str, type[ClusterProvider]] = {
@@ -25,10 +26,10 @@ def get_provider(name: str) -> type[ClusterProvider]:
     Get a provider class by name.
 
     Args:
-        name: Name of the provider (e.g., 'kind', 'k3s')
+        name (str): Name of the provider (e.g., 'kind', 'k3s')
 
     Returns:
-        Provider class
+        type[ClusterProvider]: Provider class
 
     Raises:
         ValueError: If provider name is unknown
@@ -46,6 +47,6 @@ def list_available_providers() -> list[str]:
     List names of all available providers.
 
     Returns:
-        List of provider names
+        list[str]: List of provider names
     """
     return list(PROVIDERS.keys())

@@ -17,7 +17,7 @@ We welcome contributions to Localargo! This document provides guidelines for con
 
 2. **Clone and setup:**
    ```bash
-   git clone https://github.com/U.N. Owen/localargo.git
+   git clone https://github.com/William Born/localargo.git
    cd localargo
 
    # Install all development tools
@@ -37,7 +37,7 @@ We welcome contributions to Localargo! This document provides guidelines for con
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/U.N. Owen/localargo.git
+   git clone https://github.com/William Born/localargo.git
    cd localargo
    ```
 

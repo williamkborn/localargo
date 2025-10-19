@@ -1,11 +1,12 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+"""KinD (Kubernetes in Docker) provider implementation."""
+
 from __future__ import annotations
 
 import shutil
 import subprocess
-import time
 from typing import Any
 
 from localargo.providers.base import (
@@ -14,8 +15,7 @@ from localargo.providers.base import (
     ClusterProvider,
     ProviderNotAvailableError,
 )
-
-"""KinD (Kubernetes in Docker) provider implementation."""
+from localargo.utils.cli import check_cli_availability, run_subprocess
 
 
 class KindProvider(ClusterProvider):
@@ -29,16 +29,18 @@ class KindProvider(ClusterProvider):
         """Check if KinD, kubectl, and helm are installed and available."""
         try:
             # Check kind
-            kind_path = shutil.which("kind")
-            if kind_path is None:
+            kind_path = check_cli_availability("kind")
+            if not kind_path:
                 return False
-            result = subprocess.run([kind_path, "version"], capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                [kind_path, "version"], capture_output=True, text=True, check=True
+            )
             if "kind" not in result.stdout.lower():
                 return False
 
             # Check kubectl
-            kubectl_path = shutil.which("kubectl")
-            if kubectl_path is None:
+            kubectl_path = check_cli_availability("kubectl")
+            if not kubectl_path:
                 return False
 
             # Check helm
@@ -50,7 +52,11 @@ class KindProvider(ClusterProvider):
     def create_cluster(self, **kwargs: Any) -> bool:  # noqa: ARG002
         """Create a KinD cluster and install ArgoCD with nginx-ingress."""
         if not self.is_available():
-            msg = "KinD, kubectl, and helm are required. Install from: https://kind.sigs.k8s.io/, https://kubernetes.io/docs/tasks/tools/, and https://helm.sh/"
+            msg = (
+                "KinD, kubectl, and helm are required. Install from: "
+                "https://kind.sigs.k8s.io/, https://kubernetes.io/docs/tasks/tools/, "
+                "and https://helm.sh/"
+            )
             raise ProviderNotAvailableError(msg)
 
         try:
@@ -59,7 +65,7 @@ class KindProvider(ClusterProvider):
             subprocess.run(cmd, check=True)
 
             # Wait for cluster to be ready
-            self._wait_for_cluster_ready()
+            self._wait_for_cluster_ready(f"kind-{self.name}")
 
             # Install nginx-ingress
             self._install_nginx_ingress()
@@ -70,8 +76,8 @@ class KindProvider(ClusterProvider):
         except subprocess.CalledProcessError as e:
             msg = f"Failed to create KinD cluster: {e}"
             raise ClusterCreationError(msg) from e
-        else:
-            return True
+
+        return True
 
     def delete_cluster(self, name: str | None = None) -> bool:
         """Delete a KinD cluster."""
@@ -82,8 +88,8 @@ class KindProvider(ClusterProvider):
         except subprocess.CalledProcessError as e:
             msg = f"Failed to delete KinD cluster '{cluster_name}': {e}"
             raise ClusterOperationError(msg) from e
-        else:
-            return True
+
+        return True
 
     def get_cluster_status(self, name: str | None = None) -> dict[str, Any]:
         """Get KinD cluster status information."""
@@ -96,7 +102,9 @@ class KindProvider(ClusterProvider):
             if kind_path is None:
                 msg = "kind not found in PATH. Please ensure kind is installed and available."
                 raise RuntimeError(msg)
-            result = subprocess.run([kind_path, "get", "clusters"], capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                [kind_path, "get", "clusters"], capture_output=True, text=True, check=True
+            )
             clusters = result.stdout.strip().split("\n")
             exists = cluster_name in clusters
 
@@ -111,15 +119,7 @@ class KindProvider(ClusterProvider):
             if exists:
                 # Check if context is accessible
                 try:
-                    kubectl_path = shutil.which("kubectl")
-                    if kubectl_path is None:
-                        msg = "kubectl not found in PATH. Please ensure kubectl is installed and available."
-                        raise RuntimeError(msg)
-                    subprocess.run(
-                        [kubectl_path, "cluster-info", "--context", context_name],
-                        capture_output=True,
-                        check=True,
-                    )
+                    run_subprocess(["kubectl", "cluster-info", "--context", context_name])
                     status["ready"] = True
                 except subprocess.CalledProcessError:
                     pass
@@ -127,43 +127,45 @@ class KindProvider(ClusterProvider):
         except subprocess.CalledProcessError as e:
             msg = f"Failed to get cluster status: {e}"
             raise ClusterOperationError(msg) from e
-        else:
-            return status
 
-    def _wait_for_cluster_ready(self, timeout: int = 60) -> None:
+        return status
+
+    def _wait_for_cluster_ready(
+        self, context_name: str | subprocess.Popen, timeout: int = 60
+    ) -> None:
         """Wait for the cluster to be ready."""
-        context_name = f"kind-{self.name}"
-        start_time = time.time()
-
-        while time.time() - start_time < timeout:
-            try:
-                kubectl_path = shutil.which("kubectl")
-                if kubectl_path is None:
-                    msg = "kubectl not found in PATH. Please ensure kubectl is installed and available."
-                    raise RuntimeError(msg)
-                subprocess.run(
-                    [kubectl_path, "cluster-info", "--context", context_name],
-                    capture_output=True,
-                    check=True,
-                )
-                return
-            except subprocess.CalledProcessError:
-                time.sleep(2)
-            else:
-                return
-
-        msg = f"Cluster '{self.name}' failed to become ready within {timeout} seconds"
-        raise ClusterCreationError(msg)
+        if isinstance(context_name, str) or context_name is None:
+            context_name = f"kind-{self.name}"
+        super()._wait_for_cluster_ready(context_name, timeout)
 
     def _install_nginx_ingress(self) -> None:
         """Install nginx-ingress controller."""
         helm_path = shutil.which("helm")
+        kubectl_path = shutil.which("kubectl")
         if helm_path is None:
             msg = "helm not found in PATH. Please ensure helm is installed and available."
             raise RuntimeError(msg)
+        if kubectl_path is None:
+            msg = (
+                "kubectl not found in PATH. Please ensure kubectl is installed and available."
+            )
+            raise RuntimeError(msg)
 
         try:
-            # Install nginx-ingress using helm
+            # Add ingress-nginx helm repo
+            subprocess.run(
+                [
+                    helm_path,
+                    "repo",
+                    "add",
+                    "ingress-nginx",
+                    "https://kubernetes.github.io/ingress-nginx",
+                ],
+                check=False,  # Allow failure if repo already exists
+            )
+            subprocess.run([helm_path, "repo", "update"], check=True)
+
+            # Install nginx-ingress using helm with kind-specific configuration
             subprocess.run(
                 [
                     helm_path,
@@ -176,6 +178,42 @@ class KindProvider(ClusterProvider):
                     "--create-namespace",
                     "--wait",
                     "--wait-for-jobs",
+                    "--timeout=180s",
+                    "--set",
+                    "controller.hostNetwork=true",
+                    "--set",
+                    "controller.dnsPolicy=ClusterFirstWithHostNet",
+                    "--set",
+                    "controller.kind=DaemonSet",
+                    "--set",
+                    "controller.service.type=ClusterIP",
+                    "--set",
+                    "controller.extraArgs.enable-ssl-passthrough=true",
+                    "--set",
+                    "controller.extraArgs.enable-ssl-chain-completion=false",
+                    "--set",
+                    "controller.config.use-proxy-protocol=false",
+                    "--set",
+                    "controller.config.compute-full-forwarded-for=true",
+                    "--set",
+                    "controller.config.use-forwarded-headers=true",
+                    "--set",
+                    'controller.config.ssl-protocols="TLSv1.2 TLSv1.3"',
+                    "--set",
+                    'controller.nodeSelector."kubernetes\\.io/os"=linux',
+                ],
+                check=True,
+            )
+
+            # Wait for controller to be ready
+            subprocess.run(
+                [
+                    kubectl_path,
+                    "-n",
+                    "ingress-nginx",
+                    "rollout",
+                    "status",
+                    "daemonset/ingress-nginx-controller",
                     "--timeout=180s",
                 ],
                 check=True,
@@ -194,7 +232,10 @@ class KindProvider(ClusterProvider):
 
         try:
             # Add ArgoCD helm repo
-            subprocess.run([helm_path, "repo", "add", "argo", "https://argoproj.github.io/argo-helm"], check=True)
+            subprocess.run(
+                [helm_path, "repo", "add", "argo", "https://argoproj.github.io/argo-helm"],
+                check=True,
+            )
             subprocess.run([helm_path, "repo", "update"], check=True)
 
             # Install ArgoCD

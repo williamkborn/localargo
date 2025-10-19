@@ -1,6 +1,8 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+"""Logging configuration with rich handler for localargo."""
+
 from __future__ import annotations
 
 import logging
@@ -8,8 +10,6 @@ import os
 
 from rich.console import Console
 from rich.logging import RichHandler
-
-"""Logging configuration with rich handler for localargo."""
 
 
 def setup_logging(
@@ -22,13 +22,13 @@ def setup_logging(
     """Set up logging with rich handler.
 
     Args:
-        level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        show_time: Whether to show timestamps
-        show_path: Whether to show file paths
-        rich_tracebacks: Whether to use rich tracebacks
+        level (str): Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        show_time (bool): Whether to show timestamps
+        show_path (bool): Whether to show file paths
+        rich_tracebacks (bool): Whether to use rich tracebacks
 
     Returns:
-        Configured logger instance
+        logging.Logger: Configured logger instance
     """
     # Create console for rich output
     console = Console(stderr=True)
@@ -57,20 +57,20 @@ def setup_logging(
     )
 
     # Create and return logger
-    logger = logging.getLogger("localargo")
-    logger.setLevel(numeric_level)
+    localargo_logger = logging.getLogger("localargo")
+    localargo_logger.setLevel(numeric_level)
 
-    return logger
+    return localargo_logger
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
     """Get a logger instance.
 
     Args:
-        name: Logger name (defaults to 'localargo')
+        name (str | None): Logger name (defaults to 'localargo')
 
     Returns:
-        Logger instance
+        logging.Logger: Logger instance
     """
     if name is None:
         name = "localargo"
@@ -85,10 +85,10 @@ def init_cli_logging(*, verbose: bool = False) -> logging.Logger:
     """Initialize logging for CLI usage.
 
     Args:
-        verbose: Enable debug logging
+        verbose (bool): Enable debug logging
 
     Returns:
-        Configured logger
+        logging.Logger: Configured logger
     """
     # Check environment variable first, then verbose flag
     env_level = os.getenv("LOCALARGO_LOG_LEVEL", "").upper()

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 
 #
 # SPDX-License-Identifier: MIT
@@ -146,7 +146,10 @@ class TestStepLogger:
         logger = StepLogger(["test_step"], console=console)
 
         error_msg = "Test error"
-        with pytest.raises(ValueError, match=error_msg), logger.step_with_progress("test_step", total=100) as _:
+        with (
+            pytest.raises(ValueError, match=error_msg),
+            logger.step_with_progress("test_step", total=100) as _,
+        ):
             raise ValueError(error_msg)
 
         output = console.export_text()

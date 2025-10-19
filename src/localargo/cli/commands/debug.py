@@ -1,14 +1,27 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
-from __future__ import annotations
-
-import shutil
-import subprocess
-
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 #
 # SPDX-License-Identifier: MIT
+"""Debugging and troubleshooting tools for ArgoCD.
+
+This module provides commands for debugging and troubleshooting ArgoCD applications
+and Kubernetes clusters.
+"""
+
+from __future__ import annotations
+
+import subprocess
+
 import click
+import yaml
 
 from localargo.logging import logger
+from localargo.utils.cli import (
+    build_kubectl_get_pods_cmd,
+    build_kubectl_logs_cmd,
+    check_cli_availability,
+    ensure_argocd_available,
+    ensure_kubectl_available,
+)
 
 
 @click.group()
@@ -23,51 +36,37 @@ def debug() -> None:
 def logs(app_name: str, namespace: str, tail: int) -> None:
     """Show ArgoCD application logs."""
     # Check if kubectl is available
-    kubectl_path = shutil.which("kubectl")
-    if not kubectl_path:
-        msg = "kubectl not found"
-        raise FileNotFoundError(msg)
+    kubectl_path = ensure_kubectl_available()
 
     try:
-        logger.info(f"Fetching logs for application '{app_name}'...")
+        logger.info("Fetching logs for application '%s'...", app_name)
 
         # Get application pods
-        result = subprocess.run(
-            [
-                kubectl_path,
-                "get",
-                "pods",
-                "-n",
-                namespace,
-                "-l",
-                f"app.kubernetes.io/instance={app_name}",
-                "-o",
-                "jsonpath={.items[*].metadata.name}",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        label_selector = f"app.kubernetes.io/instance={app_name}"
+        cmd = build_kubectl_get_pods_cmd(kubectl_path, namespace, label_selector)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
 
         pods = result.stdout.strip().split()
 
         if not pods:
-            logger.info(f"❌ No pods found for application '{app_name}'")
+            logger.info("❌ No pods found for application '%s'", app_name)
             return
 
         # Show logs for each pod
         for pod in pods:
-            logger.info(f"\n📄 Logs for pod: {pod}")
+            logger.info("\n📄 Logs for pod: %s", pod)
             logger.info("-" * 50)
 
             try:
-                subprocess.run([kubectl_path, "logs", "-n", namespace, pod, "--tail", str(tail)], check=True)
+                cmd = build_kubectl_logs_cmd(kubectl_path, namespace, pod, tail)
+                subprocess.run(cmd, check=True)
             except subprocess.CalledProcessError as e:
-                logger.info(f"❌ Error getting logs for pod {pod}: {e}")
+                logger.info("❌ Error getting logs for pod %s: %s", pod, e)
 
     except subprocess.CalledProcessError as e:
         logger.info(
-            f"❌ Error: {e}",
+            "❌ Error: %s",
+            e,
         )
 
 
@@ -77,22 +76,20 @@ def logs(app_name: str, namespace: str, tail: int) -> None:
 @click.option("--check-secrets", is_flag=True, help="Check if referenced secrets exist")
 def validate(app_name: str, *, check_images: bool, check_secrets: bool) -> None:
     """Validate ArgoCD application configuration."""
-    # Check if argocd and kubectl CLIs are available
-    argocd_path = shutil.which("argocd")
-    if not argocd_path:
-        msg = "argocd CLI not found"
-        raise FileNotFoundError(msg)
+    # Check if argocd CLI is available
+    argocd_path = ensure_argocd_available()
 
-    kubectl_path = shutil.which("kubectl")
-    if not kubectl_path:
-        msg = "kubectl not found"
-        raise FileNotFoundError(msg)
+    # Check if kubectl is available if secrets checking is requested
+    if check_secrets:
+        kubectl_path = ensure_kubectl_available()
 
     try:
-        logger.info(f"Validating application '{app_name}'...")
+        logger.info("Validating application '%s'...", app_name)
 
         # Get application details
-        result = subprocess.run([argocd_path, "app", "get", app_name], capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            [argocd_path, "app", "get", app_name], capture_output=True, text=True, check=True
+        )
 
         app_info = result.stdout
 
@@ -118,97 +115,98 @@ def validate(app_name: str, *, check_images: bool, check_secrets: bool) -> None:
 
         # Check for secrets if requested
         if check_secrets:
-            secret_issues = _check_secret_references(app_name)
+            secret_issues = _check_secret_references(app_name, argocd_path, kubectl_path)
             checks.extend(secret_issues)
 
         # Display results
         logger.info("\nValidation Results:")
         logger.info("=" * 30)
         for status, message in checks:
-            logger.info(f"{status} {message}")
+            logger.info("%s %s", status, message)
 
     except FileNotFoundError:
         logger.error("❌ argocd CLI not found")
     except subprocess.CalledProcessError as e:
         logger.info(
-            f"❌ Error validating application: {e}",
+            "❌ Error validating application: %s",
+            e,
         )
 
 
-@debug.command()
-@click.option("--namespace", "-n", default="argocd", help="ArgoCD namespace")
+def _check_component_health(  # pylint: disable=line-too-long
+    component: str, description: str, namespace: str, kubectl_path: str
+) -> tuple[str, str]:
+    """Check health of a single ArgoCD component."""
+    try:
+        result = subprocess.run(
+            [
+                kubectl_path,
+                "get",
+                "deployment",
+                component,
+                "-n",
+                namespace,
+                "-o",
+                "jsonpath={.status.readyReplicas}/{.status.replicas}",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        status = result.stdout.strip()
+        if "/" in status:
+            ready, total = status.split("/")
+            if ready == total and ready != "0":
+                return ("✅", f"{description}: {ready}/{total} ready")
+            return ("❌", f"{description}: {ready}/{total} ready")
+    except subprocess.CalledProcessError:
+        return ("❌", f"{description}: not found")
+
+    return ("❓", f"{description}: status unknown")
+
+
 def health(namespace: str) -> None:
     """Check ArgoCD system health."""
+    kubectl_path = check_cli_availability("kubectl", "kubectl not found")
+    if not kubectl_path:
+        logger.error("kubectl not found in PATH. Please ensure kubectl is installed.")
+        return
+
+    logger.info("Checking ArgoCD system health...")
+
+    # Check ArgoCD components
+    components = [
+        ("argocd-server", "ArgoCD Server"),
+        ("argocd-repo-server", "Repository Server"),
+        ("argocd-application-controller", "Application Controller"),
+        ("argocd-dex-server", "Dex Server (optional)"),
+        ("argocd-redis", "Redis Cache"),
+    ]
+
+    health_checks = [
+        _check_component_health(comp, desc, namespace, kubectl_path)
+        for comp, desc in components
+    ]
+
+    # Display results
+    logger.info("\nArgoCD Health Check:")
+    logger.info("=" * 30)
+    for status, message in health_checks:
+        logger.info("%s %s", status, message)
+
+    # Check API server connectivity
     try:
-        logger.info("Checking ArgoCD system health...")
+        argocd_path = ensure_argocd_available()
+    except FileNotFoundError:
+        logger.error("❌ argocd CLI not found")
+        return
 
-        # Check ArgoCD components
-        components = [
-            ("argocd-server", "ArgoCD Server"),
-            ("argocd-repo-server", "Repository Server"),
-            ("argocd-application-controller", "Application Controller"),
-            ("argocd-dex-server", "Dex Server (optional)"),
-            ("argocd-redis", "Redis Cache"),
-        ]
-
-        health_checks = []
-
-        for component, description in components:
-            try:
-                kubectl_path = shutil.which("kubectl")  # Redefine for scoping
-                if kubectl_path is None:
-                    msg = "kubectl not found in PATH. Please ensure kubectl is installed and available."
-                    raise RuntimeError(msg)
-                result = subprocess.run(
-                    [
-                        kubectl_path,
-                        "get",
-                        "deployment",
-                        component,
-                        "-n",
-                        namespace,
-                        "-o",
-                        "jsonpath={.status.readyReplicas}/{.status.replicas}",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
-
-                status = result.stdout.strip()
-                if "/" in status:
-                    ready, total = status.split("/")
-                    if ready == total and ready != "0":
-                        health_checks.append(("✅", f"{description}: {ready}/{total} ready"))
-                    else:
-                        health_checks.append(("❌", f"{description}: {ready}/{total} ready"))
-                else:
-                    health_checks.append(("❓", f"{description}: status unknown"))
-
-            except subprocess.CalledProcessError:
-                health_checks.append(("❌", f"{description}: not found"))
-
-        # Display results
-        logger.info("\nArgoCD Health Check:")
-        logger.info("=" * 30)
-        for status, message in health_checks:
-            logger.info(f"{status} {message}")
-
-        # Check API server connectivity
-        try:
-            argocd_path = shutil.which("argocd")  # Redefine for scoping
-            if argocd_path is None:
-                msg = "argocd not found in PATH. Please ensure argocd CLI is installed and available."
-                raise RuntimeError(msg)
-            subprocess.run([argocd_path, "version", "--client"], capture_output=True, check=True)
-            logger.info("✅ ArgoCD API connectivity OK")
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            logger.error("❌ ArgoCD API connectivity issues")
-
-    except (subprocess.CalledProcessError, OSError, ValueError) as e:
-        logger.info(
-            f"❌ Error checking health: {e}",
-        )
+    try:
+        subprocess.run([argocd_path, "version", "--client"], capture_output=True, check=True)
+        logger.info("✅ ArgoCD API connectivity OK")
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        logger.error("❌ ArgoCD API connectivity issues")
 
 
 @debug.command()
@@ -217,12 +215,9 @@ def health(namespace: str) -> None:
 def events(app_name: str, output: str | None) -> None:
     """Show Kubernetes events for an application."""
     # Check if argocd and kubectl CLIs are available
-    argocd_path = shutil.which("argocd")
-    if not argocd_path:
-        msg = "argocd CLI not found"
-        raise FileNotFoundError(msg)
+    argocd_path = ensure_argocd_available()
 
-    kubectl_path = shutil.which("kubectl")
+    kubectl_path = check_cli_availability("kubectl", "kubectl not found")
     if not kubectl_path:
         msg = "kubectl not found"
         raise FileNotFoundError(msg)
@@ -230,7 +225,14 @@ def events(app_name: str, output: str | None) -> None:
     try:
         # Get application namespace
         result = subprocess.run(
-            [argocd_path, "app", "get", app_name, "-o", "jsonpath={.spec.destination.namespace}"],
+            [
+                argocd_path,
+                "app",
+                "get",
+                app_name,
+                "-o",
+                "jsonpath={.spec.destination.namespace}",
+            ],
             capture_output=True,
             text=True,
             check=True,
@@ -238,16 +240,25 @@ def events(app_name: str, output: str | None) -> None:
 
         namespace = result.stdout.strip()
 
-        logger.info(f"Fetching events for application '{app_name}' in namespace '{namespace}'...")
+        logger.info(
+            "Fetching events for application '%s' in namespace '%s'...", app_name, namespace
+        )
 
         # Get events
-        cmd = [kubectl_path, "get", "events", "-n", namespace, "--sort-by=.metadata.creationTimestamp"]
+        cmd = [
+            kubectl_path,
+            "get",
+            "events",
+            "-n",
+            namespace,
+            "--sort-by=.metadata.creationTimestamp",
+        ]
 
         if output:
             # Redirect output to file
-            with open(output, "w") as f:
+            with open(output, "w", encoding="utf-8") as f:
                 subprocess.run(cmd, stdout=f, check=True)
-            logger.info(f"✅ Events written to {output}")
+            logger.info("✅ Events written to %s", output)
         else:
             # Show in terminal
             subprocess.run(cmd, check=True)
@@ -256,7 +267,8 @@ def events(app_name: str, output: str | None) -> None:
         logger.error("❌ kubectl or argocd CLI not found")
     except subprocess.CalledProcessError as e:
         logger.info(
-            f"❌ Error getting events: {e}",
+            "❌ Error getting events: %s",
+            e,
         )
 
 
@@ -265,102 +277,128 @@ def _check_container_images(app_name: str) -> list[tuple[str, str]]:
     issues = []
 
     # Check if argocd CLI is available
-    argocd_path = shutil.which("argocd")
-    if not argocd_path:
-        msg = "argocd CLI not found"
-        raise FileNotFoundError(msg)
+    argocd_path = ensure_argocd_available()
 
     try:
         # Get application manifests
-        result = subprocess.run([argocd_path, "app", "manifests", app_name], capture_output=True, text=True, check=True)
-
-        import yaml
-
-        manifests = yaml.safe_load_all(result.stdout)
-
-        for manifest in manifests:
-            if manifest.get("kind") in ["Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"]:
-                containers = manifest.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])
-                for container in containers:
-                    image = container.get("image", "")
-                    # Basic image validation (could be enhanced with actual registry checks)
-                    if not image:
-                        issues.append(("❌", f"Container missing image in {manifest.get('metadata', {}).get('name')}"))
-                    elif ":" not in image:
-                        issues.append(("⚠️ ", f"Container image without tag: {image}"))
-
-    except (subprocess.CalledProcessError, OSError, ValueError, yaml.YAMLError) as e:
-        issues.append(("❌", f"Error checking images: {e}"))
-
-    return issues
-
-
-def _check_secret_references(app_name: str) -> list[tuple[str, str]]:
-    """Check if secrets referenced in the app exist."""
-    issues = []
-
-    # Check if argocd and kubectl CLIs are available
-    argocd_path = shutil.which("argocd")
-    if not argocd_path:
-        msg = "argocd CLI not found"
-        raise FileNotFoundError(msg)
-
-    kubectl_path = shutil.which("kubectl")
-    if not kubectl_path:
-        msg = "kubectl not found"
-        raise FileNotFoundError(msg)
-
-    try:
-        # Get application destination namespace
         result = subprocess.run(
-            [argocd_path, "app", "get", app_name, "-o", "jsonpath={.spec.destination.namespace}"],
+            [argocd_path, "app", "manifests", app_name],
             capture_output=True,
             text=True,
             check=True,
         )
 
-        namespace = result.stdout.strip()
-
-        # Get application manifests
-        result = subprocess.run([argocd_path, "app", "manifests", app_name], capture_output=True, text=True, check=True)
-
-        import yaml
-
         manifests = yaml.safe_load_all(result.stdout)
 
-        referenced_secrets = set()
-
         for manifest in manifests:
-            # Check for secret references in various places
-            if manifest.get("kind") == "Secret":
-                continue  # Skip secret definitions themselves
-
-            # Check envFrom
-            spec = manifest.get("spec", {})
-            template_spec = spec.get("template", {}).get("spec", {}) if "template" in spec else spec
-
-            for container in template_spec.get("containers", []):
-                # Check envFrom for secret refs
-                for env_from in container.get("envFrom", []):
-                    if "secretRef" in env_from:
-                        referenced_secrets.add((env_from["secretRef"]["name"], namespace))
-
-                # Check individual env vars
-                for env in container.get("env", []):
-                    if "valueFrom" in env and "secretKeyRef" in env["valueFrom"]:
-                        referenced_secrets.add((env["valueFrom"]["secretKeyRef"]["name"], namespace))
-
-        # Check if referenced secrets exist
-        for secret_name, secret_ns in referenced_secrets:
-            try:
-                subprocess.run(
-                    [kubectl_path, "get", "secret", secret_name, "-n", secret_ns], capture_output=True, check=True
+            if manifest.get("kind") in [
+                "Deployment",
+                "StatefulSet",
+                "DaemonSet",
+                "Job",
+                "CronJob",
+            ]:
+                containers = (
+                    manifest.get("spec", {})
+                    .get("template", {})
+                    .get("spec", {})
+                    .get("containers", [])
                 )
-                issues.append(("✅", f"Secret '{secret_name}' exists in '{secret_ns}'"))
-            except subprocess.CalledProcessError:
-                issues.append(("❌", f"Secret '{secret_name}' not found in '{secret_ns}'"))
+                for container in containers:
+                    image = container.get("image", "")
+                    # Basic image validation (could be enhanced with actual registry checks)
+                    if not image:
+                        issues.append(
+                            (
+                                "❌",
+                                f"Container missing image in "
+                                f"{manifest.get('metadata', {}).get('name', 'unknown')}",
+                            )
+                        )
+                    elif ":" not in image:
+                        issues.append(("⚠️ ", f"Container image without tag: {image}"))
 
     except (subprocess.CalledProcessError, OSError, ValueError, yaml.YAMLError) as e:
-        issues.append(("❌", f"Error checking secrets: {e}"))
+        issues.append(
+            ("❌", f"Error checking images: {e}")
+        )  # Keep this one as it's returning issues, not raising
 
     return issues
+
+
+def _check_secret_references(
+    app_name: str, argocd_path: str, kubectl_path: str
+) -> list[tuple[str, str]]:
+    """Check if secrets referenced in the app exist."""
+    issues: list[tuple[str, str]] = []
+
+    # CLI paths are already validated in the calling function
+
+    try:
+        app_namespace = _get_app_namespace(argocd_path, app_name)
+        secret_refs = _extract_secret_refs_from_manifests(argocd_path, app_name, app_namespace)
+        _verify_secrets_exist(kubectl_path, secret_refs, issues)
+
+    except (subprocess.CalledProcessError, OSError, ValueError, yaml.YAMLError) as exc:
+        issues.append(("❌", f"Error checking secrets: {exc}"))
+
+    return issues
+
+
+def _get_app_namespace(argocd_path: str, app_name: str) -> str:
+    """Get the namespace for the ArgoCD app."""
+    result = subprocess.run(
+        [argocd_path, "app", "get", app_name, "-o", "jsonpath={.spec.destination.namespace}"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def _extract_secret_refs_from_manifests(  # pylint: disable=line-too-long
+    argocd_path: str, app_name: str, app_ns: str
+) -> set[tuple[str, str]]:
+    """Extract secret references from app manifests."""
+    result = subprocess.run(
+        [argocd_path, "app", "manifests", app_name], capture_output=True, text=True, check=True
+    )
+    manifests = yaml.safe_load_all(result.stdout)
+    secret_refs = set()
+
+    for manifest in manifests:
+        if manifest.get("kind") == "Secret":
+            continue
+
+        # Extract spec based on resource type
+        spec = manifest.get("spec", {})
+        container_spec = spec.get("template", {}).get("spec", spec)
+
+        for container in container_spec.get("containers", []):
+            # Check envFrom
+            for env_src in container.get("envFrom", []):
+                if "secretRef" in env_src:
+                    secret_refs.add((env_src["secretRef"]["name"], app_ns))
+
+            # Check env vars
+            for env_var in container.get("env", []):
+                if "valueFrom" in env_var and "secretKeyRef" in env_var["valueFrom"]:
+                    secret_refs.add((env_var["valueFrom"]["secretKeyRef"]["name"], app_ns))
+
+    return secret_refs
+
+
+def _verify_secrets_exist(  # pylint: disable=line-too-long
+    kubectl_path: str, secret_refs: set[tuple[str, str]], issues: list[tuple[str, str]]
+) -> None:
+    """Verify that referenced secrets exist in the cluster."""
+    for secret_name, namespace in secret_refs:
+        try:
+            subprocess.run(
+                [kubectl_path, "get", "secret", secret_name, "-n", namespace],
+                capture_output=True,
+                check=True,
+            )
+            issues.append(("✅", f"Secret '{secret_name}' exists in '{namespace}'"))
+        except subprocess.CalledProcessError:
+            issues.append(("❌", f"Secret '{secret_name}' not found in '{namespace}'"))

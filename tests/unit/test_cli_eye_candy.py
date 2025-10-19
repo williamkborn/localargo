@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2025-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2025-present William Born <william.born.git@gmail.com>
 
 #
 # SPDX-License-Identifier: MIT
@@ -27,7 +27,7 @@ class TestCliEyeCandy:
         # Should contain rich markup (basic check for common rich elements)
         output = result.output
         # Check for some basic rich formatting that should be present
-        # Note: rich-click may not always add markup in all cases, but basic structure should be there
+        # Note: rich-click may not always add markup, but basic structure should be there
         assert "Localargo" in output or "localargo" in output.lower()
 
     def test_cluster_apply_with_step_logger(self, tmp_path):
@@ -65,9 +65,11 @@ clusters:
         runner = CliRunner()
 
         # Mock kubectl and cluster manager to avoid actual operations
-        with patch("localargo.cli.commands.cluster.shutil.which", return_value="/usr/bin/kubectl"), patch(
-            "localargo.cli.commands.cluster.subprocess.run"
-        ) as mock_run, patch("localargo.core.cluster.cluster_manager.get_cluster_status") as mock_status:
+        with (
+            patch("shutil.which", return_value="/usr/bin/kubectl"),
+            patch("localargo.cli.commands.cluster.subprocess.run") as mock_run,
+            patch("localargo.core.cluster.cluster_manager.get_cluster_status") as mock_status,
+        ):
             # Mock successful kubectl calls
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "argocd-server deployment found"
@@ -81,7 +83,11 @@ clusters:
 
             # Check that table renderer was used (should see structured output)
             # Look for key-value panel output or table structure in result output
-            assert "Cluster Status" in result.output or "Context" in result.output or "Cluster Context" in result.output
+            assert (
+                "Cluster Status" in result.output
+                or "Context" in result.output
+                or "Cluster Context" in result.output
+            )
 
     def test_cluster_status_manifest_with_table_renderer(self, tmp_path):
         """Test cluster status-manifest command uses table renderer."""
@@ -104,11 +110,17 @@ clusters:
             mock_manager_class.return_value = mock_manager
             mock_manager.status.return_value = {
                 "test-cluster": {"exists": True, "ready": True},
-                "failed-cluster": {"exists": True, "ready": False, "error": "Connection failed"},
+                "failed-cluster": {
+                    "exists": True,
+                    "ready": False,
+                    "error": "Connection failed",
+                },
             }
 
             # Run the status-manifest command
-            result = runner.invoke(localargo, ["cluster", "status-manifest", str(manifest_file)])
+            result = runner.invoke(
+                localargo, ["cluster", "status-manifest", str(manifest_file)]
+            )
 
             # Check that it ran without errors
             assert result.exit_code == 0
