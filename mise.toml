@@ -13,13 +13,6 @@ argocd = "latest"
 # Python project management
 hatch = "latest"
 
-# Documentation
-mdbook = "latest"
-
-# Development tools
-git = "latest"
-docker = "latest"
-
 # Optional: Node.js for any frontend tools (if needed)
 # nodejs = "lts"
 
@@ -36,3 +29,7 @@ LOCALARGO_DEV = "true"
 
 # Logging configuration for development
 LOCALARGO_LOG_LEVEL = "INFO"
+
+[tasks.clean]
+description = "Delete files that match .gitignore patterns"
+run = "git clean -fdX"
