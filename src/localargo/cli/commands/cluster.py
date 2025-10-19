@@ -241,7 +241,5 @@ def password(name: str, provider: str) -> None:
         logger.error("❌ Failed to get ArgoCD password: %s", e)
         if "NotFound" in e.stderr:
             logger.info("💡 ArgoCD may not be installed or the cluster may not exist")
-        raise click.ClickException("Failed to retrieve ArgoCD password")
-    except Exception as e:
-        logger.error("❌ Error getting ArgoCD password: %s", e)
-        raise click.ClickException("Failed to retrieve ArgoCD password")
+        error_msg = "Failed to retrieve ArgoCD password"
+        raise click.ClickException(error_msg) from e

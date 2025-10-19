@@ -4,6 +4,7 @@
 #
 # SPDX-License-Identifier: MIT
 import base64
+import subprocess
 from unittest.mock import patch
 
 from click.testing import CliRunner
@@ -120,7 +121,6 @@ class TestCLICluster:
 
     def test_password_command_success(self):
         """Test password command with successful password retrieval."""
-
         runner = CliRunner()
 
         # Mock the subprocess call to return a fake base64 encoded password
@@ -138,8 +138,6 @@ class TestCLICluster:
 
     def test_password_command_failure(self):
         """Test password command when kubectl fails."""
-        import subprocess
-
         runner = CliRunner()
 
         # Mock subprocess.run to simulate a kubectl failure
