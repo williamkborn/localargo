@@ -20,25 +20,57 @@ def mock_subprocess_run():
         result.stderr = ""
 
         # Customize based on command
-        if args and len(args[0]) > 0:
-            cmd = args[0]
-            if isinstance(cmd, list) and len(cmd) > 0:
-                if "kind" in cmd[0] and "version" in cmd:
-                    result.stdout = "kind v0.20.0 go1.20.0"
-                elif "k3s" in cmd[0] and len(cmd) > 1 and cmd[1] == "--version":
-                    result.stdout = "k3s version v1.27.0+k3s1"
-                elif "kubectl" in cmd[0] and "cluster-info" in cmd:
-                    result.stdout = "Kubernetes control plane is running"
-                elif "kind" in cmd[0] and "get" in cmd and "clusters" in cmd:
-                    result.stdout = "demo\nother-cluster\n"
-                elif "helm" in cmd[0] and "repo" in cmd and "add" in cmd:
-                    result.stdout = ""  # helm repo add doesn't output much
-                elif "helm" in cmd[0] and "repo" in cmd and "update" in cmd:
-                    result.stdout = (
-                        "Hang tight while we grab the latest from your chart repositories..."
-                    )
+        if not args or not args[0]:
+            return result
 
+        cmd = args[0]
+        if not isinstance(cmd, list) or not cmd:
+            return result
+
+        # Dispatch to prepared handlers
+        _apply_mock_command_handlers(cmd, result)
         return result
+
+    def _apply_mock_command_handlers(cmd, result):
+        """Apply output adjustments based on the given command list."""
+        tool = str(cmd[0])
+        if "kind" in tool:
+            _handle_kind(cmd, result)
+            return
+        if "k3s" in tool:
+            _handle_k3s(cmd, result)
+            return
+        if "kubectl" in tool:
+            _handle_kubectl(cmd, result)
+            return
+        if "helm" in tool:
+            _handle_helm(cmd, result)
+            return
+
+    def _handle_kind(cmd, result):
+        if "version" in cmd:
+            result.stdout = "kind v0.20.0 go1.20.0"
+            return
+        if "get" in cmd and "clusters" in cmd:
+            result.stdout = "demo\nother-cluster\n"
+            return
+
+    def _handle_k3s(cmd, result):
+        if len(cmd) > 1 and cmd[1] == "--version":
+            result.stdout = "k3s version v1.27.0+k3s1"
+
+    def _handle_kubectl(cmd, result):
+        if "cluster-info" in cmd:
+            result.stdout = "Kubernetes control plane is running"
+
+    def _handle_helm(cmd, result):
+        if "repo" in cmd and "add" in cmd:
+            result.stdout = ""
+            return
+        if "repo" in cmd and "update" in cmd:
+            result.stdout = (
+                "Hang tight while we grab the latest from your chart repositories..."
+            )
 
     with patch("subprocess.run", side_effect=mock_run_side_effect) as mock_run:
         yield mock_run

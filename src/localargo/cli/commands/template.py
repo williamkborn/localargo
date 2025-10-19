@@ -189,8 +189,14 @@ def _create_argocd_app(name: str, app_config: dict[str, Any]) -> None:
 
 def _generate_app_template(config: TemplateConfig) -> dict[str, Any]:
     """Generate ArgoCD application configuration from template."""
-    # Base application structure
-    app: dict = {
+    app = _create_base_application(config)
+    _customize_application_for_type(app, config)
+    return app
+
+
+def _create_base_application(config: TemplateConfig) -> dict[str, Any]:
+    """Create the base ArgoCD application structure."""
+    return {
         "apiVersion": "argoproj.io/v1alpha1",
         "kind": "Application",
         "metadata": {"name": config.name, "namespace": "argocd"},
@@ -205,58 +211,78 @@ def _generate_app_template(config: TemplateConfig) -> dict[str, Any]:
         },
     }
 
-    # Customize based on application type
+
+def _customize_application_for_type(app: dict[str, Any], config: TemplateConfig) -> None:
+    """Customize the application based on its type."""
     if config.app_type == "web-app":
-        app["spec"]["source"]["helm"] = {
-            "parameters": [
-                {"name": "image.repository", "value": config.image or f"{config.name}"},
-                {"name": "image.tag", "value": "latest"},
-                {"name": "service.port", "value": str(config.port)},
-            ]
-        }
-        # Add environment variables
-        if config.env_vars:
-            env_params = []
-            for env in config.env_vars:
-                if "=" in env:
-                    key, value = env.split("=", 1)
-                    env_params.append({"name": f"env.{key}", "value": value})
-            if (
-                "helm" in app["spec"]["source"]
-                and "parameters" in app["spec"]["source"]["helm"]
-            ):
-                app["spec"]["source"]["helm"]["parameters"].extend(env_params)
-
+        _configure_web_app(app, config)
     elif config.app_type == "api":
-        app["spec"]["source"]["helm"] = {
-            "parameters": [
-                {"name": "image.repository", "value": config.image or f"{config.name}-api"},
-                {"name": "image.tag", "value": "latest"},
-                {"name": "service.port", "value": str(config.port)},
-                {"name": "ingress.enabled", "value": "true"},
-            ]
-        }
-
+        _configure_api_app(app, config)
     elif config.app_type == "worker":
-        app["spec"]["source"]["helm"] = {
-            "parameters": [
-                {"name": "image.repository", "value": config.image or f"{config.name}-worker"},
-                {"name": "image.tag", "value": "latest"},
-                {"name": "replicaCount", "value": "2"},
-            ]
-        }
-        # Remove service-related config for workers
-        if "syncPolicy" in app["spec"]:
-            app["spec"]["syncPolicy"] = {"automated": {}}  # Simpler sync policy
-
+        _configure_worker_app(app, config)
     elif config.app_type == "database":
-        app["spec"]["source"]["helm"] = {
-            "parameters": [
-                {"name": "image.repository", "value": config.image or "postgres"},
-                {"name": "image.tag", "value": "13"},
-                {"name": "persistence.enabled", "value": "true"},
-                {"name": "persistence.size", "value": "10Gi"},
-            ]
-        }
+        _configure_database_app(app, config)
 
-    return app
+
+def _configure_web_app(app: dict[str, Any], config: TemplateConfig) -> None:
+    """Configure a web application."""
+    app["spec"]["source"]["helm"] = {
+        "parameters": [
+            {"name": "image.repository", "value": config.image or f"{config.name}"},
+            {"name": "image.tag", "value": "latest"},
+            {"name": "service.port", "value": str(config.port)},
+        ]
+    }
+
+    if config.env_vars:
+        env_params = _build_env_parameters(config.env_vars)
+        if "helm" in app["spec"]["source"] and "parameters" in app["spec"]["source"]["helm"]:
+            app["spec"]["source"]["helm"]["parameters"].extend(env_params)
+
+
+def _configure_api_app(app: dict[str, Any], config: TemplateConfig) -> None:
+    """Configure an API application."""
+    app["spec"]["source"]["helm"] = {
+        "parameters": [
+            {"name": "image.repository", "value": config.image or f"{config.name}-api"},
+            {"name": "image.tag", "value": "latest"},
+            {"name": "service.port", "value": str(config.port)},
+            {"name": "ingress.enabled", "value": "true"},
+        ]
+    }
+
+
+def _configure_worker_app(app: dict[str, Any], config: TemplateConfig) -> None:
+    """Configure a worker application."""
+    app["spec"]["source"]["helm"] = {
+        "parameters": [
+            {"name": "image.repository", "value": config.image or f"{config.name}-worker"},
+            {"name": "image.tag", "value": "latest"},
+            {"name": "replicaCount", "value": "2"},
+        ]
+    }
+    # Remove service-related config for workers
+    if "syncPolicy" in app["spec"]:
+        app["spec"]["syncPolicy"] = {"automated": {}}  # Simpler sync policy
+
+
+def _configure_database_app(app: dict[str, Any], config: TemplateConfig) -> None:
+    """Configure a database application."""
+    app["spec"]["source"]["helm"] = {
+        "parameters": [
+            {"name": "image.repository", "value": config.image or "postgres"},
+            {"name": "image.tag", "value": "13"},
+            {"name": "persistence.enabled", "value": "true"},
+            {"name": "persistence.size", "value": "10Gi"},
+        ]
+    }
+
+
+def _build_env_parameters(env_vars: tuple[str, ...]) -> list[dict[str, str]]:
+    """Build environment variable parameters for helm."""
+    env_params = []
+    for env in env_vars:
+        if "=" in env:
+            key, value = env.split("=", 1)
+            env_params.append({"name": f"env.{key}", "value": value})
+    return env_params

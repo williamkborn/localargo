@@ -10,6 +10,7 @@ and Kubernetes clusters.
 from __future__ import annotations
 
 import subprocess
+from typing import Any
 
 import click
 import yaml
@@ -21,6 +22,7 @@ from localargo.utils.cli import (
     check_cli_availability,
     ensure_argocd_available,
     ensure_kubectl_available,
+    log_subprocess_error,
 )
 
 
@@ -64,10 +66,7 @@ def logs(app_name: str, namespace: str, tail: int) -> None:
                 logger.info("❌ Error getting logs for pod %s: %s", pod, e)
 
     except subprocess.CalledProcessError as e:
-        logger.info(
-            "❌ Error: %s",
-            e,
-        )
+        log_subprocess_error(e)
 
 
 @debug.command()
@@ -76,61 +75,64 @@ def logs(app_name: str, namespace: str, tail: int) -> None:
 @click.option("--check-secrets", is_flag=True, help="Check if referenced secrets exist")
 def validate(app_name: str, *, check_images: bool, check_secrets: bool) -> None:
     """Validate ArgoCD application configuration."""
-    # Check if argocd CLI is available
-    argocd_path = ensure_argocd_available()
-
-    # Check if kubectl is available if secrets checking is requested
-    if check_secrets:
-        kubectl_path = ensure_kubectl_available()
-
     try:
+        argocd_path = ensure_argocd_available()
+        kubectl_path = ensure_kubectl_available() if check_secrets else None
+
         logger.info("Validating application '%s'...", app_name)
 
-        # Get application details
-        result = subprocess.run(
-            [argocd_path, "app", "get", app_name], capture_output=True, text=True, check=True
-        )
+        app_info = _get_application_info(argocd_path, app_name)
+        checks = _perform_basic_validation_checks(app_info)
 
-        app_info = result.stdout
-
-        # Basic validation checks
-        checks = []
-
-        # Check sync status
-        if "OutOfSync" in app_info:
-            checks.append(("❌", "Application is out of sync"))
-        else:
-            checks.append(("✅", "Application sync status OK"))
-
-        # Check health status
-        if "Degraded" in app_info or "Unknown" in app_info:
-            checks.append(("❌", "Application health is degraded"))
-        elif "Healthy" in app_info:
-            checks.append(("✅", "Application health is OK"))
-
-        # Check for images if requested
         if check_images:
             image_issues = _check_container_images(app_name)
             checks.extend(image_issues)
 
-        # Check for secrets if requested
         if check_secrets:
             secret_issues = _check_secret_references(app_name, argocd_path, kubectl_path)
             checks.extend(secret_issues)
 
-        # Display results
-        logger.info("\nValidation Results:")
-        logger.info("=" * 30)
-        for status, message in checks:
-            logger.info("%s %s", status, message)
+        _display_validation_results(checks)
 
     except FileNotFoundError:
         logger.error("❌ argocd CLI not found")
     except subprocess.CalledProcessError as e:
-        logger.info(
-            "❌ Error validating application: %s",
-            e,
-        )
+        logger.error("❌ Error validating application: %s", e)
+
+
+def _get_application_info(argocd_path: str, app_name: str) -> str:
+    """Get application details from ArgoCD."""
+    result = subprocess.run(
+        [argocd_path, "app", "get", app_name], capture_output=True, text=True, check=True
+    )
+    return result.stdout
+
+
+def _perform_basic_validation_checks(app_info: str) -> list[tuple[str, str]]:
+    """Perform basic validation checks on application info."""
+    checks = []
+
+    # Check sync status
+    if "OutOfSync" in app_info:
+        checks.append(("❌", "Application is out of sync"))
+    else:
+        checks.append(("✅", "Application sync status OK"))
+
+    # Check health status
+    if "Degraded" in app_info or "Unknown" in app_info:
+        checks.append(("❌", "Application health is degraded"))
+    elif "Healthy" in app_info:
+        checks.append(("✅", "Application health is OK"))
+
+    return checks
+
+
+def _display_validation_results(checks: list[tuple[str, str]]) -> None:
+    """Display validation results."""
+    logger.info("\nValidation Results:")
+    logger.info("=" * 30)
+    for status, message in checks:
+        logger.info("%s %s", status, message)
 
 
 def _check_component_health(  # pylint: disable=line-too-long
@@ -274,65 +276,91 @@ def events(app_name: str, output: str | None) -> None:
 
 def _check_container_images(app_name: str) -> list[tuple[str, str]]:
     """Check if container images referenced in the app exist."""
-    issues = []
+    issues: list[tuple[str, str]] = []
 
     # Check if argocd CLI is available
     argocd_path = ensure_argocd_available()
 
     try:
-        # Get application manifests
-        result = subprocess.run(
-            [argocd_path, "app", "manifests", app_name],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        manifests = yaml.safe_load_all(result.stdout)
-
+        manifests = _load_manifests(argocd_path, app_name)
         for manifest in manifests:
-            if manifest.get("kind") in [
-                "Deployment",
-                "StatefulSet",
-                "DaemonSet",
-                "Job",
-                "CronJob",
-            ]:
-                containers = (
-                    manifest.get("spec", {})
-                    .get("template", {})
-                    .get("spec", {})
-                    .get("containers", [])
-                )
-                for container in containers:
-                    image = container.get("image", "")
-                    # Basic image validation (could be enhanced with actual registry checks)
-                    if not image:
-                        issues.append(
-                            (
-                                "❌",
-                                f"Container missing image in "
-                                f"{manifest.get('metadata', {}).get('name', 'unknown')}",
-                            )
-                        )
-                    elif ":" not in image:
-                        issues.append(("⚠️ ", f"Container image without tag: {image}"))
-
+            if _is_workload_kind(manifest.get("kind")):
+                containers = _get_containers_from_manifest(manifest)
+                _collect_image_issues(containers, manifest, issues)
     except (subprocess.CalledProcessError, OSError, ValueError, yaml.YAMLError) as e:
-        issues.append(
-            ("❌", f"Error checking images: {e}")
-        )  # Keep this one as it's returning issues, not raising
+        # Keep this one as it's returning issues, not raising
+        issues.append(("❌", f"Error checking images: {e}"))
 
     return issues
 
 
+def _load_manifests(argocd_path: str, app_name: str) -> list[dict[str, Any]]:
+    """Load manifests for an application via argocd CLI."""
+    result = subprocess.run(
+        [argocd_path, "app", "manifests", app_name],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return list(yaml.safe_load_all(result.stdout))
+
+
+def _is_workload_kind(kind: str | None) -> bool:
+    """Return True if kind is a workload that contains containers."""
+    return kind in {"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"}
+
+
+def _get_containers_from_manifest(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract containers list from manifest safely."""
+    template_spec = _get_template_spec(manifest)
+    if template_spec is None:
+        return []
+    containers = template_spec.get("containers")
+    if not isinstance(containers, list):
+        return []
+    return [c for c in containers if isinstance(c, dict)]
+
+
+def _get_template_spec(manifest: dict[str, Any]) -> dict[str, Any] | None:
+    """Safely navigate to spec.template.spec, returning a dict or None."""
+    spec = manifest.get("spec")
+    if not isinstance(spec, dict):
+        return None
+    template = spec.get("template")
+    if not isinstance(template, dict):
+        return None
+    template_spec = template.get("spec")
+    if not isinstance(template_spec, dict):
+        return None
+    return template_spec
+
+
+def _collect_image_issues(
+    containers: list[dict[str, Any]],
+    manifest: dict[str, Any],
+    issues: list[tuple[str, str]],
+) -> None:
+    """Append image-related issues for given containers to the list."""
+    for container in containers:
+        image = container.get("image", "")
+        if not image:
+            name = manifest.get("metadata", {}).get("name", "unknown")
+            issues.append(("❌", f"Container missing image in {name}"))
+        elif ":" not in image:
+            issues.append(("⚠️ ", f"Container image without tag: {image}"))
+
+
 def _check_secret_references(
-    app_name: str, argocd_path: str, kubectl_path: str
+    app_name: str, argocd_path: str, kubectl_path: str | None
 ) -> list[tuple[str, str]]:
     """Check if secrets referenced in the app exist."""
     issues: list[tuple[str, str]] = []
 
     # CLI paths are already validated in the calling function
+
+    if kubectl_path is None:
+        issues.append(("❌", "kubectl path is required for secret checking"))
+        return issues
 
     try:
         app_namespace = _get_app_namespace(argocd_path, app_name)
@@ -360,30 +388,76 @@ def _extract_secret_refs_from_manifests(  # pylint: disable=line-too-long
     argocd_path: str, app_name: str, app_ns: str
 ) -> set[tuple[str, str]]:
     """Extract secret references from app manifests."""
-    result = subprocess.run(
-        [argocd_path, "app", "manifests", app_name], capture_output=True, text=True, check=True
-    )
-    manifests = yaml.safe_load_all(result.stdout)
+    manifests = _get_app_manifests(argocd_path, app_name)
     secret_refs = set()
 
     for manifest in manifests:
         if manifest.get("kind") == "Secret":
             continue
 
-        # Extract spec based on resource type
-        spec = manifest.get("spec", {})
-        container_spec = spec.get("template", {}).get("spec", spec)
+        container_spec = _get_container_spec(manifest)
+        secret_refs.update(_extract_secret_refs_from_containers(container_spec, app_ns))
 
-        for container in container_spec.get("containers", []):
-            # Check envFrom
-            for env_src in container.get("envFrom", []):
-                if "secretRef" in env_src:
-                    secret_refs.add((env_src["secretRef"]["name"], app_ns))
+    return secret_refs
 
-            # Check env vars
-            for env_var in container.get("env", []):
-                if "valueFrom" in env_var and "secretKeyRef" in env_var["valueFrom"]:
-                    secret_refs.add((env_var["valueFrom"]["secretKeyRef"]["name"], app_ns))
+
+def _get_app_manifests(argocd_path: str, app_name: str) -> list[dict[str, str]]:
+    """Get manifests for an ArgoCD application."""
+    result = subprocess.run(
+        [argocd_path, "app", "manifests", app_name], capture_output=True, text=True, check=True
+    )
+    return list(yaml.safe_load_all(result.stdout))
+
+
+def _get_container_spec(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Get the container specification from a manifest."""
+    spec = manifest.get("spec", {})
+    if not isinstance(spec, dict):
+        return {}
+    template_spec = spec.get("template", {})
+    if not isinstance(template_spec, dict):
+        return spec
+    container_spec = template_spec.get("spec", spec)
+    if not isinstance(container_spec, dict):
+        return spec
+    return container_spec
+
+
+def _extract_secret_refs_from_containers(
+    container_spec: dict[str, Any], namespace: str
+) -> set[tuple[str, str]]:
+    """Extract secret references from container specifications."""
+    secret_refs = set()
+
+    for container in container_spec.get("containers", []):
+        secret_refs.update(_extract_secret_refs_from_env_from(container, namespace))
+        secret_refs.update(_extract_secret_refs_from_env_vars(container, namespace))
+
+    return secret_refs
+
+
+def _extract_secret_refs_from_env_from(
+    container: dict[str, Any], namespace: str
+) -> set[tuple[str, str]]:
+    """Extract secret references from envFrom configurations."""
+    secret_refs = set()
+
+    for env_src in container.get("envFrom", []):
+        if "secretRef" in env_src:
+            secret_refs.add((env_src["secretRef"]["name"], namespace))
+
+    return secret_refs
+
+
+def _extract_secret_refs_from_env_vars(
+    container: dict[str, Any], namespace: str
+) -> set[tuple[str, str]]:
+    """Extract secret references from environment variables."""
+    secret_refs = set()
+
+    for env_var in container.get("env", []):
+        if "valueFrom" in env_var and "secretKeyRef" in env_var["valueFrom"]:
+            secret_refs.add((env_var["valueFrom"]["secretKeyRef"]["name"], namespace))
 
     return secret_refs
 

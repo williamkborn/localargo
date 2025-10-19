@@ -32,83 +32,104 @@ def cluster() -> None:
 @click.option("--namespace", "-n", default="argocd", help="ArgoCD namespace")
 def status(context: str | None, namespace: str) -> None:
     """Show current cluster and ArgoCD status."""
-    # Check if kubectl is available
     kubectl_path = ensure_kubectl_available()
 
     try:
-        # Get cluster status
-        if context:
-            # Use specific context
-            logger.info("Using context: %s", context)
-            cluster_status = {"context": context, "ready": True}  # Assume ready if specified
+        cluster_status = _get_cluster_status(context)
+        argocd_installed = _check_argocd_installation(kubectl_path, namespace)
+
+        _display_cluster_status(cluster_status, namespace, argocd_installed=argocd_installed)
+
+        if argocd_installed:
+            _display_argocd_pods_status(kubectl_path, namespace)
         else:
-            cluster_status = cluster_manager.get_cluster_status()
-            logger.info("Current context: %s", cluster_status.get("context", "unknown"))
-
-        # Check if ArgoCD is installed
-        result = subprocess.run(
-            [
-                kubectl_path,
-                "get",
-                "deployment",
-                "argocd-server",
-                "-n",
-                namespace,
-                "--ignore-not-found",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        # Prepare status data for table display
-        status_data = {
-            "Cluster Context": cluster_status.get("context", "unknown"),
-            "Cluster Ready": "Yes" if cluster_status.get("ready", False) else "No",
-            "ArgoCD Status": "Installed"
-            if result.returncode == 0 and result.stdout.strip()
-            else "Not Found",
-            "Namespace": namespace,
-        }
-
-        # Use table renderer for nice display
-        table_renderer = TableRenderer()
-        table_renderer.render_key_values("Cluster Status", status_data)
-
-        if result.returncode == 0 and result.stdout.strip():
-            logger.info("✅ ArgoCD found in namespace: %s", namespace)
-            # Show ArgoCD pods status in a simple list
-            pod_result = subprocess.run(
-                build_kubectl_get_cmd(
-                    kubectl_path,
-                    "pods",
-                    namespace,
-                    label_selector="app.kubernetes.io/name=argocd-server",
-                    output_format=(
-                        "custom-columns=NAME:.metadata.name,"
-                        "STATUS:.status.phase,"
-                        "READY:.status.containerStatuses[0].ready"
-                    ),
-                ),
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-
-            if pod_result.returncode == 0 and pod_result.stdout.strip():
-                pod_lines = pod_result.stdout.strip().split("\n")[1:]  # Skip header
-                if pod_lines:
-                    table_renderer.render_simple_list(
-                        [line for line in pod_lines if line.strip()], "ArgoCD Pods"
-                    )
-        else:
-            logger.warning("❌ ArgoCD not found in namespace: %s", namespace)
-            logger.info("Run 'localargo cluster init' to set up ArgoCD locally")
+            _show_argocd_not_found_message(namespace)
 
     except subprocess.CalledProcessError as e:
         logger.error("Error checking cluster status: %s", e)
     except FileNotFoundError:
         logger.error("kubectl not found. Please install kubectl.")
+
+
+def _get_cluster_status(context: str | None) -> dict[str, str | bool]:
+    """Get cluster status information."""
+    if context:
+        logger.info("Using context: %s", context)
+        return {"context": context, "ready": True}  # Assume ready if specified
+
+    cluster_status = cluster_manager.get_cluster_status()
+    logger.info("Current context: %s", cluster_status.get("context", "unknown"))
+    return cluster_status
+
+
+def _check_argocd_installation(kubectl_path: str, namespace: str) -> bool:
+    """Check if ArgoCD is installed in the specified namespace."""
+    result = subprocess.run(
+        [
+            kubectl_path,
+            "get",
+            "deployment",
+            "argocd-server",
+            "-n",
+            namespace,
+            "--ignore-not-found",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return bool(result.returncode == 0 and result.stdout.strip())
+
+
+def _display_cluster_status(
+    cluster_status: dict[str, str | bool], namespace: str, *, argocd_installed: bool
+) -> None:
+    """Display the cluster status information."""
+    status_data = {
+        "Cluster Context": cluster_status.get("context", "unknown"),
+        "Cluster Ready": "Yes" if cluster_status.get("ready", False) else "No",
+        "ArgoCD Status": "Installed" if argocd_installed else "Not Found",
+        "Namespace": namespace,
+    }
+
+    table_renderer = TableRenderer()
+    table_renderer.render_key_values("Cluster Status", status_data)
+
+
+def _display_argocd_pods_status(kubectl_path: str, namespace: str) -> None:
+    """Display ArgoCD pods status if available."""
+    logger.info("✅ ArgoCD found in namespace: %s", namespace)
+
+    pod_result = subprocess.run(
+        build_kubectl_get_cmd(
+            kubectl_path,
+            "pods",
+            namespace,
+            label_selector="app.kubernetes.io/name=argocd-server",
+            output_format=(
+                "custom-columns=NAME:.metadata.name,"
+                "STATUS:.status.phase,"
+                "READY:.status.containerStatuses[0].ready"
+            ),
+        ),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    if pod_result.returncode == 0 and pod_result.stdout.strip():
+        pod_lines = pod_result.stdout.strip().split("\n")[1:]  # Skip header
+        if pod_lines:
+            table_renderer = TableRenderer()
+            table_renderer.render_simple_list(
+                [line for line in pod_lines if line.strip()], "ArgoCD Pods"
+            )
+
+
+def _show_argocd_not_found_message(namespace: str) -> None:
+    """Show message when ArgoCD is not found."""
+    logger.warning("❌ ArgoCD not found in namespace: %s", namespace)
+    logger.info("Run 'localargo cluster init' to set up ArgoCD locally")
 
 
 @cluster.command()

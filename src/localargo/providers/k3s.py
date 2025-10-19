@@ -163,16 +163,8 @@ class K3sProvider(ClusterProvider):
                 break
 
             # Check if kubeconfig is ready and cluster is accessible
-            kubeconfig = Path(self._kubeconfig_path)
-            if kubeconfig.exists():
-                try:
-                    run_subprocess(
-                        ["kubectl", "--kubeconfig", str(kubeconfig), "cluster-info"]
-                    )
-                except subprocess.CalledProcessError:
-                    pass
-                else:
-                    return
+            if self._is_kubeconfig_ready():
+                return
 
             time.sleep(2)
 
@@ -180,6 +172,17 @@ class K3sProvider(ClusterProvider):
             context_name.terminate()
         msg = f"k3s cluster '{self.name}' failed to become ready within {timeout} seconds"
         raise ClusterCreationError(msg)
+
+    def _is_kubeconfig_ready(self) -> bool:
+        """Return True if kubeconfig exists and cluster is accessible."""
+        kubeconfig = Path(self._kubeconfig_path)
+        if not kubeconfig.exists():
+            return False
+        try:
+            run_subprocess(["kubectl", "--kubeconfig", str(kubeconfig), "cluster-info"])
+        except subprocess.CalledProcessError:
+            return False
+        return True
 
     def _configure_kubectl_context(self) -> None:
         """Configure kubectl context for the k3s cluster."""

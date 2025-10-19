@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["mypy", "types-PyYAML", "pytest", "pylint", "pydoclint"]
+dev = ["mypy", "types-PyYAML", "pytest", "pylint", "pydoclint", "lizard"]
 watch = [
   "watchdog>=2.0.0",
 ]
@@ -55,6 +55,7 @@ typecheck = "mypy src/"
 test = "pytest"
 pylint = "python3 -m pylint ."
 pydoclint = "python3 -m pydoclint.main ."
+lizard = "python3 -m lizard -C 6 ."
 
 [tool.hatch.envs.types]
 extra-dependencies = [

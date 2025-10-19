@@ -39,6 +39,7 @@ run = "git clean -fdX"
 description = "Run formatting, typecheck, and tests before commit"
 run = [
   "hatch fmt",
+  "hatch run lizard",
   "hatch run pydoclint",
   "hatch run pylint",
   "hatch run typecheck",

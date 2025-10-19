@@ -13,13 +13,13 @@ import time
 from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Any
 
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
 try:
     from typing import Self
 except ImportError:
     from typing_extensions import Self
-
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -54,6 +54,60 @@ class StepLogger:
             f"\n[bold blue]Starting workflow with {len(self.steps)} steps...[/bold blue]\n"
         )
         return self
+
+    def _count_step_results(self) -> tuple[int, int, int]:
+        """Count completed steps by result type.
+
+        Returns:
+            tuple[int, int, int]: (success_count, warning_count, error_count)
+        """
+        success_count = self._count_where(
+            lambda si: si.get("success", False) and not si.get("warning", False)
+        )
+        warning_count = self._count_where(lambda si: si.get("warning", False))
+        error_count = self._count_where(lambda si: si.get("error", False))
+        return success_count, warning_count, error_count
+
+    def _count_where(self, predicate: Any) -> int:
+        """Count entries in completed steps where predicate returns True."""
+        return sum(1 for step_info in self._completed_steps.values() if predicate(step_info))
+
+    def _show_step_summary(self) -> None:
+        """Show a summary of all step results."""
+        if not self._completed_steps:
+            return
+
+        self.console.print("\n[bold]Step Summary:[/bold]")
+        for step_name in self.steps:
+            self._show_single_step_summary(step_name)
+
+        return
+
+    def _show_single_step_summary(self, step_name: str) -> None:
+        """Render a single step's summary line to the console."""
+        if step_name not in self._completed_steps:
+            self.console.print(f"  [dim]⏳ {step_name} (not started)[/dim]")
+            return
+
+        step_info = self._completed_steps[step_name]
+        icon, style = self._summary_icon_and_style(step_info)
+
+        if step_info.get("timestamp"):
+            duration_val = step_info["timestamp"] - self.start_time
+            duration = f" ({duration_val:.1f}s)"
+        else:
+            duration = ""
+
+        self.console.print(f"  [bold {style}]{icon} {step_name}[/bold {style}]{duration}")
+
+    @staticmethod
+    def _summary_icon_and_style(step_info: dict[str, Any]) -> tuple[str, str]:
+        """Return appropriate icon and style for the given step info."""
+        if step_info.get("success", False):
+            return "✅", "green"
+        if step_info.get("warning", False):
+            return "⚠️", "yellow"
+        return "❌", "red"
 
     def __exit__(
         self,
@@ -95,62 +149,53 @@ class StepLogger:
         **info: Any,
     ) -> None:
         """Log a step with success/failure status."""
-        if name not in self.steps:
-            self.console.print(f"[red]⚠️  Unknown step: {name}[/red]")
+        if not _validate_step_exists(name, self.steps, self.console):
             return
 
-        # Parse status string
-        success = status == "success"
-        warning = status == "warning"
-        error = status == "error"
-
-        step_info = {
-            "success": success,
-            "warning": warning,
-            "error": error,
-            "error_msg": error_msg,
-            "info": info,
-            "timestamp": time.time(),
-        }
-
+        # Parse status and create step info
+        step_info = _create_step_info(status, error_msg, info)
         self._completed_steps[name] = step_info
 
         # Update current step index
+        _update_current_step_index(name, self.steps, self)
 
-        with suppress(ValueError):
-            self.current_step_index = self.steps.index(name)
+        # Display step
+        _display_step_status(name, step_info, self.console)
 
-        # Display step status
-        if success:
-            icon = "✅"
-            style = "green"
-        elif warning:
-            icon = "⚠️"
-            style = "yellow"
-        else:
-            icon = "❌"
-            style = "red"
+    def get_step_info(self, name: str) -> dict[str, Any] | None:
+        """Get information about a specific step."""
+        return self._completed_steps.get(name)
 
-        # Format step display
-        step_display = f"[bold {style}]{icon} {name}[/bold {style}]"
+    def is_completed(self, name: str) -> bool:
+        """Check if a step has been completed."""
+        return name in self._completed_steps
 
-        if error_msg:
-            self.console.print(f"{step_display} - {error_msg}")
-        else:
-            self.console.print(step_display)
+    def get_completed_steps_count(self) -> int:
+        """Get the number of completed steps."""
+        return len(self._completed_steps)
 
-        # Show additional info if provided
-        if info:
-            info_text = ", ".join(f"{k}={v}" for k, v in info.items())
-            self.console.print(f"  [dim]{info_text}[/dim]")
+    def get_success_count(self) -> int:
+        """Get count of successful steps."""
+        success_count, _, _ = self._count_step_results()
+        return success_count
+
+    def get_error_count(self) -> int:
+        """Get count of failed steps."""
+        _, _, error_count = self._count_step_results()
+        return error_count
 
     @contextmanager
     def step_with_progress(
-        self, name: str, total: int = 100, description: str | None = None
+        self,
+        name: str,
+        total: int = 100,
+        description: str | None = None,
     ) -> Generator[Progress, None, None]:
         """Context manager for steps that need progress indication."""
         if name not in self.steps:
             self.console.print(f"[red]⚠️  Unknown step: {name}[/red]")
+            # Return a dummy progress object that does nothing
+            yield Progress()
             return
 
         with Progress(
@@ -173,77 +218,66 @@ class StepLogger:
                 self.step(name, status="error", error_msg=str(e))
                 raise
 
-    def _show_step_summary(self) -> None:
-        """Show a summary of all step results."""
-        if not self._completed_steps:
-            return
+        return
 
-        self.console.print("\n[bold]Step Summary:[/bold]")
 
-        for step_name in self.steps:
-            if step_name in self._completed_steps:
-                step_info = self._completed_steps[step_name]
-                if step_info.get("success", False):
-                    icon = "✅"
-                    style = "green"
-                elif step_info.get("warning", False):
-                    icon = "⚠️"
-                    style = "yellow"
-                else:
-                    icon = "❌"
-                    style = "red"
+def _validate_step_exists(name: str, steps: list[str], console: Console) -> bool:
+    """Validate that a step exists in the steps list."""
+    if name not in steps:
+        console.print(f"[red]⚠️  Unknown step: {name}[/red]")
+        return False
+    return True
 
-                if step_info.get("timestamp"):
-                    duration = step_info["timestamp"] - self.start_time
-                    duration = f" ({duration:.1f}s)"
-                else:
-                    duration = ""
 
-                self.console.print(
-                    f"  [bold {style}]{icon} {step_name}[/bold {style}]{duration}"
-                )
-            else:
-                self.console.print(f"  [dim]⏳ {step_name} (not started)[/dim]")
+def _create_step_info(
+    status: str, error_msg: str | None, info: dict[str, Any]
+) -> dict[str, Any]:
+    """Create step info dictionary from status and additional data."""
+    success = status == "success"
+    warning = status == "warning"
+    error = status == "error"
 
-    def get_step_info(self, name: str) -> dict[str, Any] | None:
-        """Get information about a specific step."""
-        return self._completed_steps.get(name)
+    return {
+        "success": success,
+        "warning": warning,
+        "error": error,
+        "error_msg": error_msg,
+        "info": info,
+        "timestamp": time.time(),
+    }
 
-    def is_completed(self, name: str) -> bool:
-        """Check if a step has been completed."""
-        return name in self._completed_steps
 
-    def _count_step_results(self) -> tuple[int, int, int]:
-        """Count completed steps by result type.
+def _update_current_step_index(
+    name: str, steps: list[str], progress_logger: StepLogger
+) -> None:
+    """Update the current step index."""
+    with suppress(ValueError):
+        progress_logger.current_step_index = steps.index(name)
 
-        Returns:
-            tuple[int, int, int]: (success_count, warning_count, error_count)
-        """
-        success_count = sum(
-            1
-            for step_info in self._completed_steps.values()
-            if step_info.get("success", False) and not step_info.get("warning", False)
-        )
-        warning_count = sum(
-            1
-            for step_info in self._completed_steps.values()
-            if step_info.get("warning", False)
-        )
-        error_count = sum(
-            1 for step_info in self._completed_steps.values() if step_info.get("error", False)
-        )
-        return success_count, warning_count, error_count
 
-    def get_completed_steps_count(self) -> int:
-        """Get the number of completed steps."""
-        return len(self._completed_steps)
+def _display_step_status(name: str, step_info: dict[str, Any], console: Console) -> None:
+    """Display the step status with appropriate styling."""
+    icon, style = _get_step_display_info(step_info)
 
-    def get_success_count(self) -> int:
-        """Get count of successful steps."""
-        success_count, _, _ = self._count_step_results()
-        return success_count
+    # Format step display
+    step_display = f"[bold {style}]{icon} {name}[/bold {style}]"
 
-    def get_error_count(self) -> int:
-        """Get count of failed steps."""
-        _, _, error_count = self._count_step_results()
-        return error_count
+    if step_info.get("error_msg"):
+        console.print(f"{step_display} - {step_info['error_msg']}")
+    else:
+        console.print(step_display)
+
+    # Show additional info if provided
+    info = step_info.get("info", {})
+    if info:
+        info_text = ", ".join(f"{k}={v}" for k, v in info.items())
+        console.print(f"  [dim]{info_text}[/dim]")
+
+
+def _get_step_display_info(step_info: dict[str, Any]) -> tuple[str, str]:
+    """Get the icon and style for step display."""
+    if step_info.get("success"):
+        return "✅", "green"
+    if step_info.get("warning"):
+        return "⚠️", "yellow"
+    return "❌", "red"

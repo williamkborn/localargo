@@ -17,6 +17,7 @@ import click
 from localargo.logging import logger
 from localargo.utils.cli import (
     check_cli_availability,
+    log_subprocess_error,
     run_subprocess,
 )
 
@@ -45,38 +46,11 @@ def start(
 ) -> None:
     """Start port forwarding for a service."""
     try:
-        # Auto-detect namespace if not provided
-        if not namespace:
-            namespace = _detect_app_namespace(service, argocd_namespace)
-
-        # Auto-detect ports if not provided
-        if not remote_port:
-            remote_port = _detect_service_port(service, namespace)
-
-        if not local_port:
-            local_port = remote_port
-
-        logger.info(
-            "Starting port forward: %s:%s/%s:%s", local_port, namespace, service, remote_port
+        port_config = _resolve_port_forwarding_config(
+            service, namespace, local_port, remote_port, argocd_namespace
         )
 
-        # Start port forwarding
-        cmd = [
-            "kubectl",
-            "port-forward",
-            "-n",
-            namespace,
-            f"svc/{service}",
-            f"{local_port}:{remote_port}",
-        ]
-
-        logger.info("🔗 Port forward active: http://localhost:%s", local_port)
-        logger.info("Press Ctrl+C to stop...")
-
-        try:
-            subprocess.run(cmd, check=True)
-        except KeyboardInterrupt:
-            logger.info("\n✅ Port forward stopped")
+        _execute_port_forwarding(port_config)
 
     except subprocess.CalledProcessError as e:
         logger.error("❌ Starting port forward failed with return code %s", e.returncode)
@@ -86,6 +60,64 @@ def start(
     except (OSError, ValueError) as e:
         logger.error("❌ Error starting port forward: %s", e)
         raise
+
+
+def _resolve_port_forwarding_config(
+    service: str,
+    namespace: str | None,
+    local_port: int | None,
+    remote_port: int | None,
+    argocd_namespace: str,
+) -> dict[str, str | int]:
+    """Resolve and validate port forwarding configuration."""
+    # Auto-detect namespace if not provided
+    resolved_namespace = namespace or _detect_app_namespace(service, argocd_namespace)
+
+    # Auto-detect remote port if not provided
+    resolved_remote_port = remote_port or _detect_service_port(service, resolved_namespace)
+
+    # Set local port to remote port if not provided
+    resolved_local_port = local_port or resolved_remote_port
+
+    logger.info(
+        "Starting port forward: %s:%s/%s:%s",
+        resolved_local_port,
+        resolved_namespace,
+        service,
+        resolved_remote_port,
+    )
+
+    return {
+        "service": service,
+        "namespace": resolved_namespace,
+        "local_port": resolved_local_port,
+        "remote_port": resolved_remote_port,
+    }
+
+
+def _execute_port_forwarding(config: dict[str, str | int]) -> None:
+    """Execute the port forwarding command."""
+    cmd = _build_port_forward_command(config)
+
+    logger.info("🔗 Port forward active: http://localhost:%s", config["local_port"])
+    logger.info("Press Ctrl+C to stop...")
+
+    try:
+        subprocess.run(cmd, check=True)
+    except KeyboardInterrupt:
+        logger.info("\n✅ Port forward stopped")
+
+
+def _build_port_forward_command(config: dict[str, str | int]) -> list[str]:
+    """Build the kubectl port-forward command."""
+    return [
+        "kubectl",
+        "port-forward",
+        "-n",
+        str(config["namespace"]),
+        f"svc/{config['service']}",
+        f"{config['local_port']}:{config['remote_port']}",
+    ]
 
 
 @port_forward.command()
@@ -102,52 +134,68 @@ def app(app_name: str) -> None:
     except FileNotFoundError:
         logger.error("❌ argocd CLI not found")
     except subprocess.CalledProcessError as e:
-        logger.info(
-            "❌ Error: %s",
-            e,
-        )
+        log_subprocess_error(e)
 
 
 @port_forward.command()
 def list_forwards() -> None:
     """List active port forwards."""
     try:
-        # Find kubectl port-forward processes
-        pgrep_path = shutil.which("pgrep")
-        if pgrep_path is None:
-            msg = "pgrep not found in PATH. Please ensure pgrep is installed and available."
-            raise RuntimeError(msg)
-        result = subprocess.run(
-            [pgrep_path, "-f", "kubectl port-forward"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        if result.returncode == 0 and result.stdout.strip():
-            pids = result.stdout.strip().split("\n")
+        pids = _find_port_forward_processes()
+        if pids:
             logger.info("Active port forwards (%s):", len(pids))
-            for pid in pids:
-                try:
-                    # Get process details
-                    ps_path = shutil.which("ps")
-                    if ps_path is None:
-                        msg = "ps not found in PATH. Please ensure ps is installed and available."
-                        raise RuntimeError(msg)
-                    ps_result = subprocess.run(
-                        [ps_path, "-p", pid, "-o", "pid,ppid,cmd"],
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    )
-                    logger.info(ps_result.stdout.strip())
-                except subprocess.CalledProcessError:
-                    pass
+            _display_port_forward_details(pids)
         else:
             logger.info("No active port forwards found")
 
     except FileNotFoundError:
         logger.error("❌ pgrep not available")
+
+
+def _find_port_forward_processes() -> list[str]:
+    """Find PIDs of kubectl port-forward processes."""
+    pgrep_path = shutil.which("pgrep")
+    if pgrep_path is None:
+        msg = "pgrep not found in PATH. Please ensure pgrep is installed and available."
+        raise RuntimeError(msg)
+
+    result = subprocess.run(
+        [pgrep_path, "-f", "kubectl port-forward"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip().split("\n")
+    return []
+
+
+def _display_port_forward_details(pids: list[str]) -> None:
+    """Display detailed information about port-forward processes."""
+    for pid in pids:
+        try:
+            process_details = _get_process_details(pid)
+            if process_details:
+                logger.info(process_details)
+        except subprocess.CalledProcessError:
+            pass
+
+
+def _get_process_details(pid: str) -> str | None:
+    """Get detailed information about a specific process."""
+    ps_path = shutil.which("ps")
+    if ps_path is None:
+        msg = "ps not found in PATH. Please ensure ps is installed and available."
+        raise RuntimeError(msg)
+
+    ps_result = subprocess.run(
+        [ps_path, "-p", pid, "-o", "pid,ppid,cmd"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return ps_result.stdout.strip()
 
 
 @port_forward.command()

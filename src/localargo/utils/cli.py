@@ -191,3 +191,12 @@ def run_subprocess(
         if e.stderr:
             logger.debug("Stderr: %s", e.stderr)
         raise
+
+
+def log_subprocess_error(error: subprocess.CalledProcessError) -> None:
+    """Log a subprocess error in a standardized format.
+
+    Args:
+        error (subprocess.CalledProcessError): The subprocess error to log
+    """
+    logger.info("❌ Error: %s", error)

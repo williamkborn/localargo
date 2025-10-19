@@ -43,24 +43,91 @@ def sync_cmd(
     *, watch: bool, path: str | None, app: str | None, sync_all: bool, force: bool
 ) -> None:
     """Sync ArgoCD applications or local directories."""
+    if not _validate_sync_arguments(path, app, watch=watch, sync_all=sync_all):
+        return
+
+    sync_mode = _determine_sync_mode(path, app, watch=watch, sync_all=sync_all)
+    _execute_sync_mode(sync_mode, path, app, force=force)
+
+
+def _validate_sync_arguments(
+    path: str | None, app: str | None, *, watch: bool, sync_all: bool
+) -> bool:
+    """Validate sync command arguments."""
     if watch and not path and not app:
         logger.error("❌ --watch requires --path or --app")
-        return
+        return False
 
     if sync_all and app:
         logger.error("❌ Cannot specify both --sync-all and --app")
-        return
+        return False
 
+    return True
+
+
+def _determine_sync_mode(
+    path: str | None, app: str | None, *, watch: bool, sync_all: bool
+) -> str:
+    """Determine which sync mode to use based on arguments."""
     if watch:
+        return "watch"
+    if sync_all:
+        return "sync_all"
+    if app:
+        return "sync_app"
+    if path:
+        return "sync_path"
+    return "error"
+
+
+def _execute_sync_mode(
+    sync_mode: str,
+    path: str | None,
+    app: str | None,
+    *,
+    force: bool,
+) -> None:
+    """Execute the appropriate sync mode."""
+    if sync_mode == "watch":
         _sync_watch(path, app)
-    elif sync_all:
+    elif sync_mode == "sync_all":
         _sync_all_applications(force=force)
-    elif app:
-        _sync_application(app, force=force)
-    elif path:
-        _sync_directory(path)
+    elif sync_mode == "sync_app":
+        _sync_application(app, force=force)  # type: ignore[arg-type]
+    elif sync_mode == "sync_path":
+        _sync_directory(path)  # type: ignore[arg-type]
     else:
         logger.error("❌ Specify what to sync: --app, --sync-all, or --path")
+
+
+def _get_application_list() -> list[str]:
+    """Get list of all ArgoCD applications."""
+    result = run_subprocess(["argocd", "app", "list", "-o", "name"])
+    return [app.strip() for app in result.stdout.strip().split("\n") if app.strip()]
+
+
+def _sync_multiple_applications(apps: list[str], *, force: bool) -> None:
+    """Sync multiple ArgoCD applications."""
+    for app in apps:
+        _sync_single_application_with_error_handling(app, force=force)
+
+
+def _sync_single_application_with_error_handling(app_name: str, *, force: bool) -> None:
+    """Sync a single application with error handling."""
+    try:
+        _sync_single_application(app_name, force=force)
+        logger.info("✅ '%s' synced", app_name)
+    except subprocess.CalledProcessError as e:
+        logger.info("❌ Error syncing '%s': %s", app_name, e)
+
+
+def _sync_single_application(app_name: str, *, force: bool) -> None:
+    """Sync a single ArgoCD application."""
+    logger.info("Syncing '%s'...", app_name)
+    cmd = ["argocd", "app", "sync", app_name]
+    if force:
+        cmd.append("--force")
+    subprocess.run(cmd, check=True)
 
 
 def _sync_application(app_name: str, *, force: bool = False) -> None:
@@ -86,28 +153,14 @@ def _sync_all_applications(*, force: bool = False) -> None:
     try:
         logger.info("Syncing all applications...")
 
-        # Get list of applications
-        result = run_subprocess(["argocd", "app", "list", "-o", "name"])
-
-        apps = [app.strip() for app in result.stdout.strip().split("\n") if app.strip()]
-
+        apps = _get_application_list()
         if not apps:
             logger.info("No applications found")
             return
 
         logger.info("Found %d applications: %s", len(apps), ", ".join(apps))
 
-        for app in apps:
-            try:
-                logger.info("Syncing '%s'...", app)
-                cmd = ["argocd", "app", "sync", app]
-                if force:
-                    cmd.append("--force")
-                subprocess.run(cmd, check=True)
-                logger.info("✅ '%s' synced", app)
-            except subprocess.CalledProcessError as e:
-                logger.info("❌ Error syncing '%s': %s", app, e)
-
+        _sync_multiple_applications(apps, force=force)
         logger.info("✅ All applications sync completed")
 
     except FileNotFoundError:

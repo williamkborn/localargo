@@ -178,43 +178,55 @@ class ClusterManager:
             provider (str): Provider name used
         """
         state_file = Path(".localargo") / "state.json"
+        state = _load_state_file(state_file)
+        cluster_entry = _find_or_create_cluster_entry(state, cluster_name, provider)
+        _update_cluster_entry(cluster_entry, action)
+        _save_state_file(state, state_file)
 
-        # Load existing state
-        state: dict[str, Any] = {"clusters": []}
-        if state_file.exists():
-            try:
-                with open(state_file, encoding="utf-8") as f:
-                    state = json.load(f)
-            except (json.JSONDecodeError, FileNotFoundError):
-                # Reset to empty state if file is corrupted
-                state = {"clusters": []}
 
-        # Find or create cluster entry
-        cluster_entry = None
-        for cluster in state["clusters"]:
-            if cluster["name"] == cluster_name:
-                cluster_entry = cluster
-                break
+def _load_state_file(state_file: Path) -> dict[str, Any]:
+    """Load state from file, handling corruption gracefully."""
+    state: dict[str, Any] = {"clusters": []}
+    if state_file.exists():
+        try:
+            with open(state_file, encoding="utf-8") as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            # Reset to empty state if file is corrupted
+            state = {"clusters": []}
+    return state
 
-        if cluster_entry is None:
-            cluster_entry = {
-                "name": cluster_name,
-                "provider": provider,
-                "created": None,
-                "last_action": None,
-            }
-            state["clusters"].append(cluster_entry)
 
-        # Update cluster entry
-        timestamp = int(time.time())
-        if action == "created":
-            cluster_entry["created"] = timestamp
-        cluster_entry["last_action"] = action
-        cluster_entry["last_updated"] = timestamp
+def _find_or_create_cluster_entry(
+    state: dict[str, Any], cluster_name: str, provider: str
+) -> Any:
+    """Find existing cluster entry or create a new one."""
+    for cluster in state["clusters"]:
+        if cluster["name"] == cluster_name:
+            return cluster
 
-        # Ensure state directory exists
-        state_file.parent.mkdir(exist_ok=True)
+    # Create new cluster entry
+    cluster_entry = {
+        "name": cluster_name,
+        "provider": provider,
+        "created": None,
+        "last_action": None,
+    }
+    state["clusters"].append(cluster_entry)
+    return cluster_entry
 
-        # Write updated state
-        with open(state_file, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
+
+def _update_cluster_entry(cluster_entry: dict[str, Any], action: str) -> None:
+    """Update cluster entry with action and timestamp."""
+    timestamp = int(time.time())
+    if action == "created":
+        cluster_entry["created"] = timestamp
+    cluster_entry["last_action"] = action
+    cluster_entry["last_updated"] = timestamp
+
+
+def _save_state_file(state: dict[str, Any], state_file: Path) -> None:
+    """Save state to file, ensuring directory exists."""
+    state_file.parent.mkdir(exist_ok=True)
+    with open(state_file, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)

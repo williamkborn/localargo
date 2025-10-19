@@ -131,15 +131,30 @@ def _parse_cluster_data(cluster_data: Any, index: int) -> ClusterConfig:
 
     Returns:
         ClusterConfig: Parsed cluster configuration object
-
-    Raises:
-        ManifestValidationError: If cluster data is invalid
     """
+    _validate_cluster_data_type(cluster_data, index)
+    _validate_required_fields(cluster_data, index)
+
+    name = cluster_data["name"]
+    provider_name = cluster_data["provider"]
+
+    _validate_field_types(name, provider_name, index)
+    _validate_provider_exists(provider_name, index)
+
+    kwargs = _extract_additional_kwargs(cluster_data)
+
+    return ClusterConfig(name=name, provider=provider_name, **kwargs)
+
+
+def _validate_cluster_data_type(cluster_data: Any, index: int) -> None:
+    """Validate that cluster data is a dictionary."""
     if not isinstance(cluster_data, dict):
         msg = f"Cluster {index} must be a dictionary"
         raise ManifestValidationError(msg)
 
-    # Required fields
+
+def _validate_required_fields(cluster_data: dict[str, Any], index: int) -> None:
+    """Validate that required fields are present."""
     if "name" not in cluster_data:
         msg = f"Cluster {index} missing required 'name' field"
         raise ManifestValidationError(msg)
@@ -148,9 +163,9 @@ def _parse_cluster_data(cluster_data: Any, index: int) -> ClusterConfig:
         msg = f"Cluster {index} missing required 'provider' field"
         raise ManifestValidationError(msg)
 
-    name = cluster_data["name"]
-    provider_name = cluster_data["provider"]
 
+def _validate_field_types(name: Any, provider_name: Any, index: int) -> None:
+    """Validate that name and provider fields are strings."""
     if not isinstance(name, str):
         msg = f"Cluster {index} 'name' must be a string"
         raise ManifestValidationError(msg)
@@ -159,17 +174,19 @@ def _parse_cluster_data(cluster_data: Any, index: int) -> ClusterConfig:
         msg = f"Cluster {index} 'provider' must be a string"
         raise ManifestValidationError(msg)
 
-    # Validate provider exists
+
+def _validate_provider_exists(provider_name: str, index: int) -> None:
+    """Validate that the provider exists."""
     try:
         get_provider(provider_name)
     except ValueError as e:
         msg = f"Cluster {index}: {e}"
         raise ManifestValidationError(msg) from e
 
-    # Extract additional kwargs (everything except name and provider)
-    kwargs = {k: v for k, v in cluster_data.items() if k not in ("name", "provider")}
 
-    return ClusterConfig(name=name, provider=provider_name, **kwargs)
+def _extract_additional_kwargs(cluster_data: dict[str, Any]) -> dict[str, Any]:
+    """Extract additional kwargs excluding name and provider."""
+    return {k: v for k, v in cluster_data.items() if k not in ("name", "provider")}
 
 
 def validate_manifest(manifest_path: str | Path) -> bool:
