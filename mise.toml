@@ -33,3 +33,18 @@ LOCALARGO_LOG_LEVEL = "INFO"
 [tasks.clean]
 description = "Delete files that match .gitignore patterns"
 run = "git clean -fdX"
+
+[tasks.precommit]
+description = "Run formatting, typecheck, and tests before commit"
+run = [
+  "hatch fmt",
+  "hatch run typecheck",
+  "hatch run test"
+]
+
+[tasks.setup-dev]
+description = "Set up local development environment and precommit hook"
+run = [
+  "mise install",
+  "mise generate git-pre-commit --write --task=precommit"
+]

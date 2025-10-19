@@ -53,6 +53,7 @@ dependencies = [
 ]
 [tool.hatch.envs.default.scripts]
 typecheck = "mypy src/"
+test = "pytest"
 
 [tool.hatch.envs.types]
 extra-dependencies = [
