@@ -128,9 +128,11 @@ def init(provider: str, name: str) -> None:
             logger.info("✅ %s cluster '%s' created successfully", provider.upper(), name)
             if provider == "kind":
                 logger.info(
-                    "🌐 ArgoCD UI will be available at: http://localhost:8080 (after installation)"
+                    "🌐 ArgoCD UI will be available at: "
+                    "https://argocd.localtest.me (after installation)"
                 )
                 logger.info("🔧 Development ports available: 30000-30002")
+                logger.info("💡 Add '127.0.0.1 argocd.localtest.me' to your /etc/hosts file")
         else:
             logger.error("Failed to create %s cluster '%s'", provider, name)
     except subprocess.CalledProcessError as e:

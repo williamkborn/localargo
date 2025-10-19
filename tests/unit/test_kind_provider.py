@@ -88,6 +88,7 @@ class TestKindProvider:
             patch.object(provider, "_wait_for_cluster_ready"),
             patch.object(provider, "_install_nginx_ingress"),
             patch.object(provider, "_install_argocd"),
+            patch.object(provider, "_create_argocd_tls_certificate"),
         ):
             result = provider.create_cluster()
 

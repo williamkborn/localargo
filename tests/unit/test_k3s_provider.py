@@ -32,7 +32,7 @@ class TestK3sProvider:
 
             provider = K3sProvider(name="test")
 
-            assert provider._kubeconfig_path == "/tmp/test-kubeconfig.yaml"  # noqa: SLF001
+            assert provider._kubeconfig_path == "/tmp/test-kubeconfig.yaml"
             mock_mkstemp.assert_called_once_with(suffix=".yaml")
 
     def test_is_available_with_k3s_present(self):
@@ -57,7 +57,7 @@ class TestK3sProvider:
     def test_create_cluster_success(self, mock_subprocess_popen):
         """Test successful cluster creation."""
         provider = K3sProvider(name="demo")
-        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"  # noqa: SLF001
+        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"
 
         # Mock the private methods
         with (
@@ -124,7 +124,7 @@ class TestK3sProvider:
     def test_get_cluster_status_with_kubeconfig_exists_and_ready(self, mock_subprocess_run):
         """Test cluster status when kubeconfig exists and cluster is ready."""
         provider = K3sProvider(name="demo")
-        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"  # noqa: SLF001
+        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"
 
         with patch("pathlib.Path.exists", return_value=True):
             status = provider.get_cluster_status()
@@ -155,7 +155,7 @@ class TestK3sProvider:
     def test_get_cluster_status_with_kubeconfig_not_exists(self, mock_subprocess_run):
         """Test cluster status when kubeconfig doesn't exist."""
         provider = K3sProvider(name="demo")
-        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"  # noqa: SLF001
+        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"
 
         with patch("pathlib.Path.exists", return_value=False):
             status = provider.get_cluster_status()
@@ -176,7 +176,7 @@ class TestK3sProvider:
     def test_get_cluster_status_with_kubeconfig_exists_but_not_ready(self):
         """Test cluster status when kubeconfig exists but kubectl fails."""
         provider = K3sProvider(name="demo")
-        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"  # noqa: SLF001
+        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"
 
         with (
             patch("pathlib.Path.exists", return_value=True),
@@ -197,7 +197,7 @@ class TestK3sProvider:
     def test_get_cluster_status_with_custom_name(self):
         """Test cluster status retrieval with custom cluster name."""
         provider = K3sProvider(name="demo")
-        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"  # noqa: SLF001
+        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"
 
         with patch("pathlib.Path.exists", return_value=False):
             status = provider.get_cluster_status(name="custom-cluster")
@@ -215,7 +215,7 @@ class TestK3sProvider:
     def test_get_cluster_status_explicit_patch(self):
         """Test cluster status retrieval using explicit subprocess patching."""
         provider = K3sProvider(name="demo")
-        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"  # noqa: SLF001
+        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"
 
         with (
             patch("localargo.providers.k3s.subprocess.run") as mock_run,
