@@ -26,6 +26,14 @@ classifiers = [
 ]
 dependencies = [
   "click",
+  "pyyaml",
+  "rich",
+]
+
+[project.optional-dependencies]
+dev = ["mypy", "types-PyYAML"]
+watch = [
+  "watchdog>=2.0.0",
 ]
 
 [project.urls]
@@ -38,6 +46,13 @@ localargo = "localargo.cli:localargo"
 
 [tool.hatch.version]
 path = "src/localargo/__about__.py"
+
+[tool.hatch.envs.default]
+dependencies = [
+  "localargo[dev]"
+]
+[tool.hatch.envs.default.scripts]
+typecheck = "mypy src/"
 
 [tool.hatch.envs.types]
 extra-dependencies = [
@@ -64,3 +79,24 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
 ]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = ["src"]
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+strict_optional = true
+no_implicit_optional = true
+ignore_missing_imports = true
+
+[tool.hatch.envs.docs]
+dependencies = [
+  "mdbook>=0.4.0",
+]
+[tool.hatch.envs.docs.scripts]
+build = "mdbook build {args:docs}"
+serve = "mdbook serve {args:docs}"

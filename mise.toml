@@ -1,0 +1,38 @@
+# mise configuration for Localargo development
+# https://mise.jdx.dev/
+
+[tools]
+# Python version for development
+python = "3.12"
+
+# Kubernetes tools
+kind = "latest"
+kubectl = "latest"
+argocd = "latest"
+
+# Python project management
+hatch = "latest"
+
+# Documentation
+mdbook = "latest"
+
+# Development tools
+git = "latest"
+docker = "latest"
+
+# Optional: Node.js for any frontend tools (if needed)
+# nodejs = "lts"
+
+[settings]
+# Enable experimental features if needed
+# experimental = true
+
+[env]
+# Set PYTHONPATH to include src directory for development
+PYTHONPATH = "{{ config_root }}/src"
+
+# Development environment variables
+LOCALARGO_DEV = "true"
+
+# Logging configuration for development
+LOCALARGO_LOG_LEVEL = "INFO"
