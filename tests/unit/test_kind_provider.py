@@ -127,6 +127,20 @@ class TestKindProvider:
         with pytest.raises(ClusterOperationError, match="Failed to delete KinD cluster 'demo'"):
             provider.delete_cluster()
 
+    def test_delete_cluster_invokes_correct_command_explicit_patch(self):
+        """Test delete_cluster invokes correct command using explicit module patching."""
+        from unittest.mock import patch
+
+        with patch("localargo.providers.kind.subprocess.run") as mock_run:
+            provider = KindProvider("demo")
+            provider.delete_cluster()
+            mock_run.assert_called_once_with(["kind", "delete", "cluster", "--name", "demo"], check=True)
+
+    def test_get_context_name(self):
+        """Test get_context_name returns correct context name format."""
+        provider = KindProvider(name="demo")
+        assert provider.get_context_name("demo") == "kind-demo"
+
     def test_get_cluster_status_success(self, mock_subprocess_run):
         """Test successful cluster status retrieval."""
         # Mock kind get clusters command

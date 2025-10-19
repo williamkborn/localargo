@@ -100,10 +100,35 @@ def new_command():
 
 ## Testing
 
+LocalArgo follows a **mocked testing philosophy** where all tests are fully isolated and require no external dependencies.
+
+### Development and Testing Loop
+
+All developers must run the following before committing or opening a PR:
+
+```bash
+# 1. Format code and tests
+hatch fmt
+
+# 2. Type-check
+hatch run typecheck
+
+# 3. Run tests (unit only, mocked)
+pytest -v
+
+# 4. (Optional) Check coverage
+pytest --cov=localargo --cov-report=term-missing
+```
+
+All tests are fully mocked—no Kubernetes, Docker, or Kind binaries are required.
+
+### Writing Tests
+
 - Write tests in the `tests/` directory
 - Use pytest for testing framework
 - Aim for good test coverage
-- Run tests with `hatch run test`
+- All subprocess calls must be mocked (see `tests/conftest.py`)
+- Tests should verify command construction, not execution
 
 ## Documentation
 

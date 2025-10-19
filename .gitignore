@@ -48,6 +48,7 @@ htmlcov/
 .DS_Store
 .DS_Store?
 ._*
+.__*
 .Spotlight-V100
 .Trashes
 ehthumbs.db
@@ -58,6 +59,8 @@ docs/book/
 
 # Hatch
 .hatch/
+dist/
+build/
 
 # Mise
 .mise/

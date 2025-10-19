@@ -63,3 +63,9 @@ def mock_shutil_which():
 
     with patch("shutil.which", side_effect=mock_which) as mock_which_func:
         yield mock_which_func
+
+
+@pytest.fixture(autouse=True)
+def no_sleep(monkeypatch):
+    """Prevent accidental real sleeps during tests."""
+    monkeypatch.setattr("time.sleep", lambda *_: None)

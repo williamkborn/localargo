@@ -203,3 +203,31 @@ class TestK3sProvider:
                 "kubeconfig": "/tmp/test-kubeconfig.yaml",
             }
             assert status == expected_status
+
+    def test_get_cluster_status_explicit_patch(self):
+        """Test cluster status retrieval using explicit subprocess patching."""
+        from unittest.mock import patch
+
+        provider = K3sProvider(name="demo")
+        provider._kubeconfig_path = "/tmp/test-kubeconfig.yaml"  # noqa: SLF001
+
+        with patch("localargo.providers.k3s.subprocess.run") as mock_run, patch(
+            "pathlib.Path.exists", return_value=True
+        ):
+            mock_run.return_value.returncode = 0
+            status = provider.get_cluster_status()
+
+            expected_status = {
+                "provider": "k3s",
+                "name": "demo",
+                "exists": True,
+                "context": "demo",
+                "ready": True,
+                "kubeconfig": "/tmp/test-kubeconfig.yaml",
+            }
+            assert status == expected_status
+
+            # Verify kubectl command was called
+            mock_run.assert_called_once_with(
+                ["/usr/local/bin/kubectl", "--kubeconfig", "/tmp/test-kubeconfig.yaml", "cluster-info"], check=True
+            )
