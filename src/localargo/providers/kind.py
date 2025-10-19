@@ -28,39 +28,55 @@ class KindProvider(ClusterProvider):
         return "kind"
 
     def is_available(self) -> bool:
-        """Check if KinD is installed and available."""
+        """Check if KinD, kubectl, and helm are installed and available."""
         try:
+            # Check kind
             kind_path = shutil.which("kind")
             if kind_path is None:
                 return False
             result = subprocess.run([kind_path, "version"], capture_output=True, text=True, check=True)
-            return "kind" in result.stdout.lower()
+            if "kind" not in result.stdout.lower():
+                return False
+
+            # Check kubectl
+            kubectl_path = shutil.which("kubectl")
+            if kubectl_path is None:
+                return False
+
+            # Check helm
+            helm_path = shutil.which("helm")
+            if helm_path is None:
+                return False
+
+            return True
         except (subprocess.CalledProcessError, FileNotFoundError, RuntimeError):
             return False
 
     def create_cluster(self, **kwargs: Any) -> bool:  # noqa: ARG002
-        """Create a KinD cluster with ArgoCD-optimized configuration."""
+        """Create a KinD cluster and install ArgoCD with nginx-ingress."""
         if not self.is_available():
-            msg = "KinD is not installed. Install from: https://kind.sigs.k8s.io/"
+            msg = "KinD, kubectl, and helm are required. Install from: https://kind.sigs.k8s.io/, https://kubernetes.io/docs/tasks/tools/, and https://helm.sh/"
             raise ProviderNotAvailableError(msg)
 
-        config_path = self._create_config_file()
         try:
-            # Create the cluster
-            cmd = ["kind", "create", "cluster", "--config", str(config_path), "--name", self.name]
-            subprocess.run(cmd, check=True)  # Show output for debugging
+            # Create a simple cluster
+            cmd = ["kind", "create", "cluster", "--name", self.name]
+            subprocess.run(cmd, check=True)
 
             # Wait for cluster to be ready
             self._wait_for_cluster_ready()
+
+            # Install nginx-ingress
+            self._install_nginx_ingress()
+
+            # Install ArgoCD
+            self._install_argocd()
 
         except subprocess.CalledProcessError as e:
             msg = f"Failed to create KinD cluster: {e}"
             raise ClusterCreationError(msg) from e
         else:
             return True
-        finally:
-            # Clean up config file
-            config_path.unlink(missing_ok=True)
 
     def delete_cluster(self, name: str | None = None) -> bool:
         """Delete a KinD cluster."""
@@ -119,49 +135,6 @@ class KindProvider(ClusterProvider):
         else:
             return status
 
-    def _create_config_file(self) -> Path:
-        """Create a KinD configuration file optimized for ArgoCD."""
-        config_content = f"""
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-name: {self.name}
-nodes:
-- role: control-plane
-  # Configure control plane with extra port mappings for ArgoCD
-  extraPortMappings:
-  - containerPort: 30080
-    hostPort: 8080
-    protocol: TCP
-  - containerPort: 30443
-    hostPort: 8443
-    protocol: TCP
-  # Additional ports for development services
-  - containerPort: 30000
-    hostPort: 30000
-    protocol: TCP
-  - containerPort: 30001
-    hostPort: 30001
-    protocol: TCP
-  - containerPort: 30002
-    hostPort: 30002
-    protocol: TCP
-  kubeadmConfigPatches:
-  - |
-    kind: InitConfiguration
-    nodeRegistration:
-      kubeletExtraArgs:
-        node-labels: "ingress-ready=true"
-  extraMounts:
-  - hostPath: /tmp/kind-pv
-    containerPath: /tmp/kind-pv
-  # Configure containerd for better performance
-  image: kindest/node:v1.27.3@sha256:3966ac761ae0136263ffdb6cfd4db23ef8a83cba8a463690e98317add2c9ba72f97
-"""
-
-        config_file = Path(tempfile.NamedTemporaryFile(suffix=".yaml", delete=False).name)
-        config_file.write_text(config_content)
-        return config_file
-
     def _wait_for_cluster_ready(self, timeout: int = 60) -> None:
         """Wait for the cluster to be ready."""
         context_name = f"kind-{self.name}"
@@ -178,10 +151,53 @@ nodes:
                     capture_output=True,
                     check=True,
                 )
+                return
             except subprocess.CalledProcessError:
                 time.sleep(2)
-            else:
-                return
 
         msg = f"Cluster '{self.name}' failed to become ready within {timeout} seconds"
         raise ClusterCreationError(msg)
+
+    def _install_nginx_ingress(self) -> None:
+        """Install nginx-ingress controller."""
+        helm_path = shutil.which("helm")
+        if helm_path is None:
+            msg = "helm not found in PATH. Please ensure helm is installed and available."
+            raise RuntimeError(msg)
+
+        try:
+            # Install nginx-ingress using helm
+            subprocess.run([
+                helm_path, "upgrade", "--install", "ingress-nginx", "ingress-nginx/ingress-nginx",
+                "--namespace", "ingress-nginx", "--create-namespace",
+                "--wait", "--wait-for-jobs", "--timeout=180s"
+            ], check=True)
+
+        except subprocess.CalledProcessError as e:
+            msg = f"Failed to install nginx-ingress: {e}"
+            raise ClusterCreationError(msg) from e
+
+    def _install_argocd(self) -> None:
+        """Install ArgoCD using helm."""
+        helm_path = shutil.which("helm")
+        if helm_path is None:
+            msg = "helm not found in PATH. Please ensure helm is installed and available."
+            raise RuntimeError(msg)
+
+        try:
+            # Add ArgoCD helm repo
+            subprocess.run([
+                "helm", "repo", "add", "argo", "https://argoproj.github.io/argo-helm"
+            ], check=True)
+            subprocess.run(["helm", "repo", "update"], check=True)
+
+            # Install ArgoCD
+            subprocess.run([
+                "helm", "upgrade", "--install", "argocd", "argo/argo-cd",
+                "--namespace", "argocd", "--create-namespace",
+                "--wait", "--wait-for-jobs", "--timeout=180s"
+            ], check=True)
+
+        except subprocess.CalledProcessError as e:
+            msg = f"Failed to install ArgoCD: {e}"
+            raise ClusterCreationError(msg) from e

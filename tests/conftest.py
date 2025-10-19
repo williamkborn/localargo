@@ -29,6 +29,10 @@ def mock_subprocess_run():
                     result.stdout = "Kubernetes control plane is running"
                 elif "kind" in cmd[0] and "get" in cmd and "clusters" in cmd:
                     result.stdout = "demo\nother-cluster\n"
+                elif "helm" in cmd[0] and "repo" in cmd and "add" in cmd:
+                    result.stdout = ""  # helm repo add doesn't output much
+                elif "helm" in cmd[0] and "repo" in cmd and "update" in cmd:
+                    result.stdout = "Hang tight while we grab the latest from your chart repositories..."
 
         return result
 
@@ -58,6 +62,7 @@ def mock_shutil_which():
             "kind": "/usr/local/bin/kind",
             "k3s": "/usr/local/bin/k3s",
             "kubectl": "/usr/local/bin/kubectl",
+            "helm": "/usr/local/bin/helm",
         }
         return available_tools.get(cmd)
 
