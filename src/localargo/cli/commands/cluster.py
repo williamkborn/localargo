@@ -140,32 +140,47 @@ def _show_argocd_not_found_message(namespace: str) -> None:
     help="Local cluster provider",
 )
 @click.option("--name", default="localargo", help="Cluster name")
-def init(provider: str, name: str) -> None:
+@click.argument("cluster_name", required=False)
+def init(provider: str, name: str, cluster_name: str | None) -> None:
     """Initialize a local Kubernetes cluster with ArgoCD."""
+    effective_name = cluster_name or name
+    if _do_create_cluster(provider, effective_name):
+        _log_kind_hints_if_applicable(provider)
+
+
+def _do_create_cluster(provider: str, name: str) -> bool:
+    """Create cluster with error handling and logging. Returns success flag."""
     logger.info("Initializing %s cluster '%s' with ArgoCD...", provider, name)
 
     try:
         success = cluster_manager.create_cluster(provider, name)
-        if success:
-            logger.info("✅ %s cluster '%s' created successfully", provider.upper(), name)
-            if provider == "kind":
-                logger.info(
-                    "🌐 ArgoCD UI will be available at: "
-                    "https://argocd.localtest.me (after installation)"
-                )
-                logger.info("🔧 Development ports available: 30000-30002")
-                logger.info(
-                    "🚀 Cluster configured with direct port access to ingress controller"
-                )
-        else:
-            logger.error("Failed to create %s cluster '%s'", provider, name)
     except subprocess.CalledProcessError as e:
         logger.error("❌ Creating cluster failed with return code %s", e.returncode)
         if e.stderr:
             logger.error("Error details: %s", e.stderr.strip())
-        raise
+        return False
     except (OSError, ValueError) as e:
         logger.error("Error creating cluster: %s", e)
+        return False
+
+    if success:
+        logger.info("✅ %s cluster '%s' created successfully", provider.upper(), name)
+        return True
+
+    logger.error("Failed to create %s cluster '%s'", provider, name)
+    return False
+
+
+def _log_kind_hints_if_applicable(provider: str) -> None:
+    """Log helpful hints when using kind provider."""
+    if provider != "kind":
+        return
+    logger.info(
+        "🌐 ArgoCD UI will be available at: "
+        "https://argocd.localtest.me (after installation)"
+    )
+    logger.info("🔧 Development ports available: 30000-30002")
+    logger.info("🚀 Cluster configured with direct port access to ingress controller")
 
 
 @cluster.command()
@@ -188,6 +203,37 @@ def list_contexts() -> None:
             logger.info("  %s", ctx)
     else:
         logger.error("No contexts found or kubectl not available")
+
+
+@cluster.command(name="list")
+def list_clusters() -> None:
+    """List available clusters across providers."""
+    clusters = cluster_manager.list_clusters()
+
+    rows: list[dict[str, str]] = []
+    for c in clusters:
+        provider = str(c.get("provider", ""))
+        name = str(c.get("name", ""))
+        cluster_status = (
+            "ready"
+            if c.get("ready", False)
+            else ("exists" if c.get("exists", False) else "missing")
+        )
+        context = str(c.get("context", ""))
+        rows.append(
+            {
+                "name": name,
+                "provider": provider,
+                "status": cluster_status,
+                "context": context,
+            }
+        )
+
+    renderer = TableRenderer()
+    if rows:
+        renderer.render_status_table(rows)
+    else:
+        renderer.render_simple_list([], "Clusters")
 
 
 @cluster.command()
