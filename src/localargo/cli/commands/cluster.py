@@ -132,7 +132,9 @@ def init(provider: str, name: str) -> None:
                     "https://argocd.localtest.me (after installation)"
                 )
                 logger.info("🔧 Development ports available: 30000-30002")
-                logger.info("💡 Add '127.0.0.1 argocd.localtest.me' to your /etc/hosts file")
+                logger.info(
+                    "🚀 Cluster configured with direct port access to ingress controller"
+                )
         else:
             logger.error("Failed to create %s cluster '%s'", provider, name)
     except subprocess.CalledProcessError as e:

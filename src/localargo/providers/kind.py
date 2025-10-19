@@ -8,7 +8,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +26,21 @@ class KindProvider(ClusterProvider):
     @property
     def provider_name(self) -> str:
         return "kind"
+
+    def _create_kind_config(self) -> str:
+        """Create a kind cluster config with port mappings for ingress."""
+        return """kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  - containerPort: 80
+    hostPort: 80
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 443
+    protocol: TCP
+"""
 
     def is_available(self) -> bool:
         """Check if KinD, kubectl, and helm are installed and available."""
@@ -63,9 +77,27 @@ class KindProvider(ClusterProvider):
             raise ProviderNotAvailableError(msg)
 
         try:
-            # Create a simple cluster
-            cmd = ["kind", "create", "cluster", "--name", self.name]
+            # Create cluster with port mappings for direct access
+            config_content = self._create_kind_config()
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".yaml", delete=False
+            ) as config_file:
+                config_file.write(config_content)
+                config_file_path = config_file.name
+
+            cmd = [
+                "kind",
+                "create",
+                "cluster",
+                "--name",
+                self.name,
+                "--config",
+                config_file_path,
+            ]
             subprocess.run(cmd, check=True)
+
+            # Clean up temporary config file
+            Path(config_file_path).unlink(missing_ok=True)
 
             # Wait for cluster to be ready
             self._wait_for_cluster_ready(f"kind-{self.name}")
@@ -75,9 +107,6 @@ class KindProvider(ClusterProvider):
 
             # Install ArgoCD
             self._install_argocd()
-
-            # Create TLS certificate for ArgoCD ingress
-            self._create_argocd_tls_certificate()
 
         except subprocess.CalledProcessError as e:
             msg = f"Failed to create KinD cluster: {e}"
@@ -207,6 +236,8 @@ class KindProvider(ClusterProvider):
                     "controller.config.ssl-protocols=TLSv1.2 TLSv1.3",
                     "--set",
                     r"controller.nodeSelector.kubernetes\.io/os=linux",
+                    "--set",
+                    "controller.config.server-name-hash-bucket-size=256",
                 ],
                 check=True,
             )
@@ -244,7 +275,7 @@ class KindProvider(ClusterProvider):
             )
             subprocess.run([helm_path, "repo", "update"], check=True)
 
-            # Install ArgoCD with ingress enabled
+            # Install ArgoCD with ingress enabled using proper SSL passthrough configuration
             subprocess.run(
                 [
                     helm_path,
@@ -263,13 +294,29 @@ class KindProvider(ClusterProvider):
                     "--set",
                     "server.ingress.ingressClassName=nginx",
                     "--set",
-                    "server.ingress.hosts[0]=argocd.localtest.me",
+                    "server.ingress.hostname=argocd.localtest.me",
                     "--set",
-                    "server.ingress.tls[0].hosts[0]=argocd.localtest.me",
+                    "server.ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/"
+                    "force-ssl-redirect=true",
                     "--set",
-                    "server.ingress.tls[0].secretName=argocd-tls",
+                    "server.ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/"
+                    "ssl-passthrough=true",
                     "--set",
-                    "server.extraArgs[0]=--insecure",  # For local development
+                    "server.ingress.paths[0]=/",
+                    "--set",
+                    "server.ingress.pathType=Prefix",
+                    "--set",
+                    "server.ingress.tls=false",
+                    "--set",
+                    "server.extraArgs[0]=--insecure=false",
+                    "--set",
+                    "configs.params.server.insecure=false",
+                    "--set",
+                    "configs.params.server.grpc.web=true",
+                    "--set",
+                    "global.domain=argocd.localtest.me",
+                    "--set",
+                    "configs.cm.url=https://argocd.localtest.me",
                 ],
                 check=True,
             )
@@ -277,117 +324,3 @@ class KindProvider(ClusterProvider):
         except subprocess.CalledProcessError as e:
             msg = f"Failed to install ArgoCD: {e}"
             raise ClusterCreationError(msg) from e
-
-    def _create_argocd_tls_certificate(self) -> None:
-        """Create a self-signed TLS certificate for ArgoCD ingress."""
-        kubectl_path = shutil.which("kubectl")
-        openssl_path = shutil.which("openssl")
-        if kubectl_path is None:
-            msg = (
-                "kubectl not found in PATH. Please ensure kubectl is installed and available."
-            )
-            raise RuntimeError(msg)
-        if openssl_path is None:
-            msg = (
-                "openssl not found in PATH. Please ensure openssl is installed and available."
-            )
-            raise RuntimeError(msg)
-
-        # Use secure temporary files
-        with (
-            tempfile.NamedTemporaryFile(mode="w+", suffix=".key", delete=False) as key_file,
-            tempfile.NamedTemporaryFile(mode="w+", suffix=".csr", delete=False) as csr_file,
-            tempfile.NamedTemporaryFile(mode="w+", suffix=".crt", delete=False) as cert_file,
-        ):
-            key_path = key_file.name
-            csr_path = csr_file.name
-            cert_path = cert_file.name
-
-        try:
-            # Create a self-signed certificate using openssl
-            # Generate private key
-            subprocess.run(
-                [openssl_path, "genrsa", "-out", key_path, "2048"],
-                check=True,
-                capture_output=True,
-            )
-
-            # Generate certificate signing request
-            subprocess.run(
-                [
-                    openssl_path,
-                    "req",
-                    "-new",
-                    "-key",
-                    key_path,
-                    "-out",
-                    csr_path,
-                    "-subj",
-                    "/CN=argocd.localtest.me",
-                ],
-                check=True,
-                capture_output=True,
-            )
-
-            # Generate self-signed certificate
-            subprocess.run(
-                [
-                    openssl_path,
-                    "x509",
-                    "-req",
-                    "-days",
-                    "365",
-                    "-in",
-                    csr_path,
-                    "-signkey",
-                    key_path,
-                    "-out",
-                    cert_path,
-                ],
-                check=True,
-                capture_output=True,
-            )
-
-            # Create TLS secret in argocd namespace
-            subprocess.run(
-                [
-                    kubectl_path,
-                    "create",
-                    "secret",
-                    "tls",
-                    "argocd-tls",
-                    f"--cert={cert_path}",
-                    f"--key={key_path}",
-                    "--namespace=argocd",
-                    "--dry-run=client",
-                    "-o",
-                    "yaml",
-                ],
-                check=True,
-                capture_output=True,
-            )
-
-            # Apply the secret
-            subprocess.run(
-                [
-                    kubectl_path,
-                    "create",
-                    "secret",
-                    "tls",
-                    "argocd-tls",
-                    f"--cert={cert_path}",
-                    f"--key={key_path}",
-                    "--namespace=argocd",
-                ],
-                check=False,  # Allow failure if secret already exists
-                capture_output=True,
-            )
-
-        except subprocess.CalledProcessError as e:
-            msg = f"Failed to create TLS certificate for ArgoCD: {e}"
-            raise ClusterCreationError(msg) from e
-        finally:
-            # Clean up temporary files
-            for path in [key_path, csr_path, cert_path]:
-                with suppress(OSError):
-                    Path(path).unlink(missing_ok=True)

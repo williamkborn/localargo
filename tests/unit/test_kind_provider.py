@@ -88,7 +88,6 @@ class TestKindProvider:
             patch.object(provider, "_wait_for_cluster_ready"),
             patch.object(provider, "_install_nginx_ingress"),
             patch.object(provider, "_install_argocd"),
-            patch.object(provider, "_create_argocd_tls_certificate"),
         ):
             result = provider.create_cluster()
 
@@ -100,10 +99,19 @@ class TestKindProvider:
 
             # The second call should be the cluster creation
             create_call = actual_calls[1]
-            expected_cmd = ["kind", "create", "cluster", "--name", "demo"]
             expected_kwargs = {"check": True}
 
-            assert create_call[0][0] == expected_cmd
+            # The command should be: kind create cluster --name demo --config /tmp/tmpXXX.yaml
+            assert create_call[0][0][0] == "kind"
+            assert create_call[0][0][1] == "create"
+            assert create_call[0][0][2] == "cluster"
+            assert create_call[0][0][3] == "--name"
+            assert create_call[0][0][4] == "demo"
+            assert create_call[0][0][5] == "--config"
+            assert (
+                len(create_call[0][0]) == 7
+            )  # Should have 7 elements total (including config file path)
+            assert create_call[0][0][6].endswith(".yaml")  # Config file path
             assert create_call[1] == expected_kwargs
 
     def test_create_cluster_not_available_raises_error(self):
