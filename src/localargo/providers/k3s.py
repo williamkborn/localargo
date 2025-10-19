@@ -39,11 +39,10 @@ class K3sProvider(ClusterProvider):
         try:
             k3s_path = shutil.which("k3s")
             if k3s_path is None:
-                msg = "k3s not found in PATH. Please ensure k3s is installed and available."
-                raise RuntimeError(msg)
+                return False
             result = subprocess.run([k3s_path, "--version"], capture_output=True, text=True, check=True)
             return "k3s" in result.stdout.lower()
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except (subprocess.CalledProcessError, FileNotFoundError, RuntimeError):
             return False
 
     def create_cluster(self, **kwargs: Any) -> bool:  # noqa: ARG002

@@ -32,11 +32,10 @@ class KindProvider(ClusterProvider):
         try:
             kind_path = shutil.which("kind")
             if kind_path is None:
-                msg = "kind not found in PATH. Please ensure kind is installed and available."
-                raise RuntimeError(msg)
+                return False
             result = subprocess.run([kind_path, "version"], capture_output=True, text=True, check=True)
             return "kind" in result.stdout.lower()
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except (subprocess.CalledProcessError, FileNotFoundError, RuntimeError):
             return False
 
     def create_cluster(self, **kwargs: Any) -> bool:  # noqa: ARG002

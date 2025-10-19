@@ -31,7 +31,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["mypy", "types-PyYAML"]
+dev = ["mypy", "types-PyYAML", "pytest"]
 watch = [
   "watchdog>=2.0.0",
 ]
@@ -79,6 +79,11 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "if TYPE_CHECKING:",
 ]
+
+[tool.pytest.ini_options]
+addopts = "-v --maxfail=1 --disable-warnings"
+testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.mypy]
 python_version = "3.12"

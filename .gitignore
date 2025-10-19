@@ -61,3 +61,8 @@ docs/book/
 
 # Mise
 .mise/
+
+# tarballs
+*.tar.gz
+*.tar
+
