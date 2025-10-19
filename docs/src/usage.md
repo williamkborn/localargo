@@ -64,10 +64,13 @@ localargo cluster list
 
 ### Application Management
 
-Create, sync, and manage ArgoCD applications:
+Create, sync, and manage applications. You can deploy in two ways:
+
+- Via ArgoCD CLI (default): create/update ArgoCD Applications and sync
+- Via kubectl with a kubeconfig: apply one or more manifest files directly
 
 ```bash
-# Create a new application
+# Create a new application (ArgoCD mode)
 localargo app create my-app --repo https://github.com/myorg/myrepo
 
 # Sync an application
@@ -76,11 +79,51 @@ localargo app sync my-app
 # Check application status
 localargo app status my-app
 
-# Show diff between desired and live state
-localargo app diff my-app
-
 # Delete an application
 localargo app delete my-app
+```
+
+#### Deploying via kubectl with a kubeconfig
+
+Add `manifest_files` to your `localargo.yaml` app entries to apply YAMLs with kubectl:
+
+```yaml
+apps:
+  - name: core-local
+    manifest_files:
+      - /path/to/apps/core/local/core-app.yaml
+  - name: keycloak-local
+    manifest_files:
+      - /path/to/apps/keycloak/local/keycloak-app.yaml
+```
+
+Then deploy with an optional kubeconfig:
+
+```bash
+# Deploy only manifest-based apps in catalog (kubectl apply -f ...)
+localargo app deploy --all --kubeconfig /path/to/kubeconfig
+
+# Or a single app
+localargo app deploy core-local --kubeconfig /path/to/kubeconfig
+```
+
+#### Deploying from flags (create/update ArgoCD app directly)
+
+You can skip the catalog and deploy a single app by specifying repo details:
+
+```bash
+# Create/update and sync an ArgoCD app directly
+localargo app deploy \
+  --repo https://gitlab.com/govflows/platform/core.git \
+  --app-name core-local \
+  --repo-path infra/charts \
+  --namespace core-local \
+  --project default \
+  --type helm \
+  --helm-values ../environments/local/values-core.yaml
+
+# Or apply one or more manifests directly without catalog
+localargo app deploy -f /abs/path/to/app.yaml [-f another.yaml] --kubeconfig /path/to/kubeconfig
 ```
 
 ### Port Forwarding

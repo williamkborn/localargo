@@ -22,6 +22,9 @@ class AppSpec:  # pylint: disable=too-many-instance-attributes
     sync_policy: Literal["manual", "auto"] = "manual"
     helm_values: list[str] = field(default_factory=list)
     health_timeout: int = 300
+    # Optional: if provided, deployment will be done via `kubectl apply -f` on these files
+    # instead of using the ArgoCD CLI to create/update applications.
+    manifest_files: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -102,6 +105,7 @@ def _build_spec_from_raw(raw: Any, idx: int) -> AppSpec:
     sync_policy = _parse_sync_policy(raw, idx)
     helm_values = _parse_helm_values(raw, idx)
     health_timeout = _parse_health_timeout(raw)
+    manifest_files = _parse_manifest_files(raw)
     return AppSpec(
         name=name,
         repo=repo,
@@ -112,6 +116,7 @@ def _build_spec_from_raw(raw: Any, idx: int) -> AppSpec:
         sync_policy=sync_policy,
         helm_values=[str(v) for v in helm_values],
         health_timeout=health_timeout,
+        manifest_files=manifest_files,
     )
 
 
@@ -145,6 +150,25 @@ def _parse_health_timeout(raw: dict[str, Any]) -> int:
     return int(raw.get("healthTimeout", 300))
 
 
+def _normalize_manifest_files(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list) and all(isinstance(v, str | os.PathLike) for v in value):
+        return [str(v) for v in value]
+    msg = "manifest files must be a list of strings"
+    raise CatalogError(msg)
+
+
+def _parse_manifest_files(raw: dict[str, Any]) -> list[str]:
+    # Support both snake_case and camelCase
+    vals = []
+    if "manifest_files" in raw and raw["manifest_files"] is not None:
+        vals.extend(_normalize_manifest_files(raw["manifest_files"]))
+    if "manifestFiles" in raw and raw["manifestFiles"] is not None:
+        vals.extend(_normalize_manifest_files(raw["manifestFiles"]))
+    return vals
+
+
 def _apply_overlay_to_map(by_name: dict[str, AppSpec], raw: Any, idx: int) -> None:
     if not isinstance(raw, dict):
         msg = f"overlay apps[{idx}] must be a mapping"
@@ -168,6 +192,7 @@ def _apply_overlay_to_spec(base: AppSpec, raw: dict[str, Any]) -> None:
     _overlay_sync_policy(base, raw)
     _overlay_helm_values(base, raw)
     _overlay_health_timeout(base, raw)
+    _overlay_manifest_files(base, raw)
 
 
 def _overlay_repo(base: AppSpec, raw: dict[str, Any]) -> None:
@@ -215,6 +240,17 @@ def _overlay_helm_values(base: AppSpec, raw: dict[str, Any]) -> None:
 def _overlay_health_timeout(base: AppSpec, raw: dict[str, Any]) -> None:
     if "healthTimeout" in raw:
         base.health_timeout = int(raw["healthTimeout"])
+
+
+def _overlay_manifest_files(base: AppSpec, raw: dict[str, Any]) -> None:
+    # Merge manifest files if present in overlay
+    files = []
+    if "manifest_files" in raw:
+        files.extend(_normalize_manifest_files(raw["manifest_files"]))
+    if "manifestFiles" in raw:
+        files.extend(_normalize_manifest_files(raw["manifestFiles"]))
+    if files:
+        base.manifest_files = files
 
 
 def _normalize_overlay_helm_values(value: Any) -> list[str]:

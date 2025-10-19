@@ -1,10 +1,42 @@
-"""Kubernetes helpers for app pod discovery and log streaming."""
+"""Kubernetes helpers for app pod discovery, log streaming, and manifest apply."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from localargo.logging import logger
+from localargo.utils.cli import run_subprocess
 from localargo.utils.proc import run_json, run_stream
+
+
+def _kubeconfig_args(kubeconfig: str | None) -> list[str]:
+    if not kubeconfig:
+        return []
+    # Allow both file paths and directories (ignore directories gracefully)
+    path = Path(kubeconfig)
+    if path.exists() and path.is_file():
+        return ["--kubeconfig", str(path)]
+    return ["--kubeconfig", str(path)]
+
+
+def apply_manifests(files: list[str], *, kubeconfig: str | None = None) -> None:
+    """Apply one or more manifest files using kubectl apply -f.
+
+    Args:
+        files (list[str]): List of file paths (YAML files or directories). Each
+            will be passed to kubectl via repeated -f flags.
+        kubeconfig (str | None): Optional kubeconfig file path. When provided,
+            it's passed to kubectl via --kubeconfig.
+    """
+    if not files:
+        return
+    args: list[str] = ["kubectl", *(_kubeconfig_args(kubeconfig)), "apply"]
+    for f in files:
+        args.extend(["-f", f])
+    logger.info("Applying manifests: %s", ", ".join(files))
+    run_subprocess(args)
+
 
 if TYPE_CHECKING:  # imported only for type checking
     from collections.abc import Iterator

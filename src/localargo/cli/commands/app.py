@@ -41,9 +41,68 @@ def status(name: str | None, *, watch: bool, profile: str | None) -> None:
 @click.option("--all", "all_", is_flag=True, help="Target all apps from catalog")
 @click.option("--wait/--no-wait", default=True, help="Wait for Healthy after sync")
 @click.option("--profile", default=None, help="Profile overlay to apply")
-def deploy(name: str | None, *, all_: bool, wait: bool, profile: str | None) -> None:
+@click.option(
+    "--kubeconfig",
+    default=None,
+    help="Path to kubeconfig for kubectl-based deployments",
+)
+@click.option(
+    "-f",
+    "--file",
+    "manifest_files",
+    multiple=True,
+    help="Manifest file or directory to apply (kubectl -f). Repeatable.",
+)
+@click.option("--repo", default=None, help="Git repo URL for ArgoCD app")
+@click.option("--app-name", "app_name_override", default=None, help="ArgoCD application name")
+@click.option("--repo-path", default=".", help="Path within repo (default '.')")
+@click.option("--namespace", default="default", help="Destination namespace")
+@click.option("--project", default="default", help="ArgoCD project")
+@click.option(
+    "--type",
+    "app_type",
+    type=click.Choice(["kustomize", "helm"], case_sensitive=False),
+    default="kustomize",
+    help="Application type",
+)
+@click.option(
+    "--helm-values",
+    "helm_values",
+    multiple=True,
+    help="Additional Helm values files (only for --type helm). Repeatable.",
+)
+def deploy(
+    name: str | None,
+    *,
+    all_: bool,
+    wait: bool,
+    profile: str | None,
+    kubeconfig: str | None,
+    manifest_files: tuple[str, ...],
+    repo: str | None,
+    app_name_override: str | None,
+    repo_path: str,
+    namespace: str,
+    project: str,
+    app_type: str,
+    helm_values: tuple[str, ...],
+) -> None:
     """Create/update and sync one or all apps using catalog."""
-    core_apps.deploy(name, all_=all_, wait=wait, profile=profile)
+    core_apps.deploy(
+        name,
+        all_=all_,
+        wait=wait,
+        profile=profile,
+        kubeconfig=kubeconfig,
+        manifest_files=list(manifest_files),
+        override_repo=repo,
+        override_name=app_name_override,
+        override_path=repo_path,
+        override_namespace=namespace,
+        override_project=project,
+        override_type=app_type,
+        override_helm_values=list(helm_values),
+    )
 
 
 @app.command()
