@@ -14,7 +14,38 @@ localargo --help
 
 ### Cluster Management
 
-Manage Kubernetes clusters for ArgoCD development:
+#### Declarative Cluster Management (Recommended)
+
+LocalArgo supports declarative cluster management using YAML manifests. Define your clusters in a `clusters.yaml` file:
+
+```yaml
+clusters:
+  - name: dev-cluster
+    provider: kind
+  - name: staging-cluster
+    provider: k3s
+```
+
+Then use these commands to manage your clusters:
+
+```bash
+# Create all clusters defined in clusters.yaml
+localargo cluster apply
+
+# Delete all clusters defined in clusters.yaml
+localargo cluster delete
+
+# Show status of all clusters defined in clusters.yaml
+localargo cluster status
+
+# Use a custom manifest file
+localargo cluster apply my-clusters.yaml
+localargo cluster status production-clusters.yaml
+```
+
+#### Imperative Cluster Management (Legacy)
+
+For individual cluster operations:
 
 ```bash
 # Check current cluster and ArgoCD status
@@ -148,6 +179,51 @@ Localargo supports standard CLI options:
 - `--version`: Show version number and exit
 
 ## Configuration
+
+### Cluster Manifests
+
+Cluster manifests are YAML files that declaratively define the clusters you want to manage. The basic structure is:
+
+```yaml
+clusters:
+  - name: cluster-name      # Required: unique cluster identifier
+    provider: kind          # Required: provider type (kind, k3s)
+    # Additional provider-specific options can be added here
+```
+
+#### Supported Providers
+
+- **kind**: Kubernetes in Docker - lightweight clusters for development
+- **k3s**: Lightweight Kubernetes - production-like clusters
+
+#### Advanced Manifest Features
+
+```yaml
+clusters:
+  # Multiple clusters of different providers
+  - name: development
+    provider: kind
+    # Additional options can be provider-specific
+
+  - name: staging
+    provider: k3s
+    # k3s-specific configuration options
+    version: "v1.27.0+k3s1"
+
+  # Environment-specific configurations
+  - name: ci-cluster
+    provider: kind
+    nodes: 3  # Custom node configuration
+```
+
+#### Manifest Validation
+
+You can validate a manifest file without applying it:
+
+```bash
+# This will check syntax and provider availability
+python -c "from localargo.config.manifest import validate_manifest; validate_manifest('clusters.yaml')"
+```
 
 Localargo currently works with your existing kubectl and argocd CLI configurations. Future versions may support additional configuration options.
 

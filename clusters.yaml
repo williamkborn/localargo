@@ -1,0 +1,20 @@
+# Example cluster manifest for LocalArgo
+# This file defines clusters that can be managed declaratively
+
+clusters:
+  # Development cluster using KinD
+  - name: dev-cluster
+    provider: kind
+    # Additional provider-specific options can be added here
+    # For example, you could specify Kubernetes version, node configuration, etc.
+
+  # Staging cluster using k3s
+  - name: staging-cluster
+    provider: k3s
+    # Provider-specific configuration would go here
+    # For k3s, you might specify server configuration, networking options, etc.
+
+  # Production-like cluster for testing
+  - name: prod-like-cluster
+    provider: kind
+    # Multiple clusters of the same provider type are supported

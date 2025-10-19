@@ -10,6 +10,7 @@ import click
 
 from localargo.core.cluster import cluster_manager
 from localargo.logging import logger
+from localargo.manager import ClusterManager, ClusterManagerError
 
 
 @click.group()
@@ -103,3 +104,103 @@ def list_contexts() -> None:
             logger.info(f"  {ctx}")
     else:
         logger.error("No contexts found or kubectl not available")
+
+
+# Declarative cluster management commands
+
+
+@cluster.command()
+@click.argument("manifest", type=click.Path(exists=True), default="clusters.yaml")
+def apply(manifest: str) -> None:
+    """Create clusters defined in manifest file."""
+    try:
+        manager = ClusterManager(manifest)
+        results = manager.apply()
+
+        successful = sum(results.values())
+        total = len(results)
+
+        if successful == total:
+            logger.info(f"✅ Successfully created {successful}/{total} clusters")
+        else:
+            logger.warning(f"⚠️  Created {successful}/{total} clusters")
+
+        # Show detailed results
+        for cluster_name, success in results.items():
+            status = "✅" if success else "❌"
+            logger.info(f"  {status} {cluster_name}")
+
+    except ClusterManagerError as e:
+        logger.error(f"Error applying manifest: {e}")
+        raise click.ClickException(str(e)) from e
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise click.ClickException(str(e)) from e
+
+
+@cluster.command()
+@click.argument("manifest", type=click.Path(exists=True), default="clusters.yaml")
+def delete(manifest: str) -> None:
+    """Delete clusters defined in manifest file."""
+    try:
+        manager = ClusterManager(manifest)
+        results = manager.delete()
+
+        successful = sum(results.values())
+        total = len(results)
+
+        if successful == total:
+            logger.info(f"✅ Successfully deleted {successful}/{total} clusters")
+        else:
+            logger.warning(f"⚠️  Deleted {successful}/{total} clusters")
+
+        # Show detailed results
+        for cluster_name, success in results.items():
+            status = "✅" if success else "❌"
+            logger.info(f"  {status} {cluster_name}")
+
+    except ClusterManagerError as e:
+        logger.error(f"Error deleting clusters: {e}")
+        raise click.ClickException(str(e)) from e
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise click.ClickException(str(e)) from e
+
+
+@cluster.command()
+@click.argument("manifest", type=click.Path(exists=True), default="clusters.yaml")
+def status_manifest(manifest: str) -> None:
+    """Show status of clusters defined in manifest file."""
+    try:
+        manager = ClusterManager(manifest)
+        results = manager.status()
+
+        ready_count = 0
+        exists_count = 0
+
+        for cluster_name, status_info in results.items():
+            exists = status_info.get("exists", False)
+            ready = status_info.get("ready", False)
+
+            if exists:
+                exists_count += 1
+                if ready:
+                    ready_count += 1
+
+            if "error" in status_info:
+                logger.error(f"❌ {cluster_name}: {status_info['error']}")
+            elif ready:
+                logger.info(f"✅ {cluster_name}: ready")
+            elif exists:
+                logger.warning(f"⚠️  {cluster_name}: exists but not ready")
+            else:
+                logger.warning(f"❌ {cluster_name}: does not exist")
+
+        logger.info(f"Summary: {ready_count}/{exists_count} clusters ready, {len(results)} total")
+
+    except ClusterManagerError as e:
+        logger.error(f"Error getting cluster status: {e}")
+        raise click.ClickException(str(e)) from e
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise click.ClickException(str(e)) from e
