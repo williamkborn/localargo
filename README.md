@@ -65,6 +65,28 @@ hatch env create
 # All tools will be automatically available
 ```
 
+### 🧩 Git Hook Setup
+
+To ensure code quality before every commit, enable the mise-managed pre-commit hook:
+
+```bash
+mise generate git-pre-commit --write --task=precommit
+```
+
+This creates `.git/hooks/pre-commit`, which automatically runs:
+
+- `hatch fmt`
+- `hatch run typecheck`
+- `hatch run test`
+
+If any step fails, the commit will be blocked until fixed.
+
+You can also run it manually at any time:
+
+```bash
+mise run precommit
+```
+
 ### Optional Dependencies
 
 For file watching functionality:
@@ -92,3 +114,4 @@ hatch run docs:build
 ## License
 
 `localargo` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
+# Test comment for precommit hook
