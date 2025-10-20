@@ -9,7 +9,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import os
-import time
+from dataclasses import dataclass
 from typing import Any
 
 from localargo.core.catalog import AppSpec, AppState
@@ -110,15 +110,72 @@ class ArgoClient:
         return "Unknown"
 
     def wait_healthy(self, name: str, *, timeout: int = 300) -> str:
-        """Poll app status until Healthy or timeout; returns final health string."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            st = self.get_app(name)
-            if st.health == "Healthy":
-                return st.health
-            time.sleep(2)
-        msg = f"{name} not healthy after {timeout}s"
+        """Wait for Healthy using ArgoCD CLI and raise helpful error on timeout."""
+        succeeded = True
+        try:
+            # Delegate waiting logic to ArgoCD; it honors rollout states and dependencies
+            self.run_with_auth(
+                ["argocd", "app", "wait", name, "--health", "--timeout", str(timeout)]
+            )
+        except ProcessError:
+            succeeded = False
+        if succeeded:
+            return "Healthy"
+        summary = self._summarize_unhealthy(name)
+        msg = f"{name} not healthy after {timeout}s" + (f": {summary}" if summary else "")
         raise TimeoutError(msg)
+
+    def _summarize_unhealthy(self, name: str) -> str:
+        """Return a one-line summary of the first non-Healthy resource, if any."""
+        try:
+            # Fetch app JSON via CLI
+            raw: Any = self.run_json_with_auth(
+                [
+                    "argocd",
+                    "app",
+                    "get",
+                    name,
+                    "-o",
+                    "json",
+                ]
+            )
+        except ProcessError:
+            return ""
+        resources = self._get_resources_from_app_json(raw)
+        info = self._first_unhealthy_resource(resources)
+        if not info:
+            return ""
+        kind, res_name, h_status, message = info
+        suffix = f" - {message}" if message else ""
+        return f"{kind}/{res_name}: {h_status}{suffix}"
+
+    def _get_resources_from_app_json(self, obj: Any) -> list[dict[str, Any]]:
+        """Extract the resources array from an argocd app JSON object."""
+        if not isinstance(obj, dict):
+            return []
+        status = obj.get("status", {})
+        if not isinstance(status, dict):
+            return []
+        resources = status.get("resources", [])
+        if not isinstance(resources, list):
+            return []
+        return [r for r in resources if isinstance(r, dict)]
+
+    def _first_unhealthy_resource(
+        self, resources: list[dict[str, Any]]
+    ) -> tuple[str, str, str, str] | None:
+        """Return tuple(kind, name, status, message) for the first unhealthy resource."""
+        for res in resources:
+            health = res.get("health", {})
+            if not isinstance(health, dict):
+                continue
+            h_status = str(health.get("status") or "")
+            if h_status and h_status != "Healthy":
+                kind = str(res.get("kind", ""))
+                name_val = str(res.get("name", ""))
+                message = str(health.get("message", ""))
+                return (kind, name_val, h_status, message)
+        return None
 
     def get_apps(self) -> list[AppState]:
         """Return all ArgoCD apps as AppState list."""
@@ -135,6 +192,86 @@ class ArgoClient:
     def delete_app(self, name: str) -> None:
         """Delete an ArgoCD application by name."""
         self.run_with_auth(["argocd", "app", "delete", name, "--yes"])
+
+    # ---------- Repo credentials ----------
+    def add_repo_cred(
+        self,
+        *,
+        repo_url: str,
+        username: str,
+        password: str,
+        options: RepoAddOptions | None = None,
+    ) -> None:
+        """Add repository credentials to ArgoCD (supports git and helm OCI)."""
+        args = _build_repo_add_args(
+            repo_url=repo_url,
+            username=username,
+            password=password,
+            options=options or RepoAddOptions(),
+        )
+        try:
+            self.run_with_auth(args)
+        except ProcessError as e:
+            if _repo_already_configured(e.stderr):
+                logger.info("Repo creds for %s already exist", repo_url)
+            else:
+                logger.error(
+                    "Failed to add repo creds for %s. stderr: %s",
+                    repo_url,
+                    (e.stderr or "").strip(),
+                )
+                raise
+
+
+def _repo_already_configured(stderr: str | None) -> bool:
+    msg = stderr or ""
+    return (
+        "AlreadyExists" in msg
+        or "already associated" in msg
+        or "repository is already configured" in msg
+    )
+
+
+@dataclass
+class RepoAddOptions:
+    """Options to control 'argocd repo add' invocation."""
+
+    repo_type: str = "git"
+    enable_oci: bool = False
+    description: str | None = None
+    name: str | None = None
+
+
+def _build_repo_add_args(
+    *, repo_url: str, username: str, password: str, options: RepoAddOptions
+) -> list[str]:
+    args = [
+        "argocd",
+        "repo",
+        "add",
+        repo_url,
+        "--username",
+        username,
+        "--password",
+        password,
+    ]
+    if options.repo_type:
+        args.extend(["--type", options.repo_type])
+    if options.enable_oci:
+        args.append("--enable-oci")
+    # For Helm (incl. OCI) repos, argocd requires a --name
+    if options.repo_type == "helm":
+        repo_name = options.name or _derive_repo_name(repo_url)
+        if repo_name:
+            args.extend(["--name", repo_name])
+    # --description is not supported by many argocd CLI versions; omit for compatibility
+    return args
+
+
+def _derive_repo_name(repo_url: str) -> str:
+    """Derive a short name from a repo URL like 'registry-1.docker.io/bitnamicharts'."""
+    parts = repo_url.rstrip("/").split("/")
+    return parts[-1] if parts else repo_url
 
 
 def _get_initial_admin_password(namespace: str) -> str:
@@ -198,7 +335,8 @@ def _build_create_args(spec: AppSpec) -> list[str]:
         spec.project,
     ]
     if spec.type == "helm":
-        args.append("--helm")
+        # ArgoCD expects --values and optionally --release-name for Helm apps;
+        # it does not support a standalone --helm flag.
         for v in spec.helm_values:
             args.extend(["--values", v])
     return args
@@ -222,7 +360,7 @@ def _build_update_args(spec: AppSpec) -> list[str]:
         spec.project,
     ]
     if spec.type == "helm":
-        args.append("--helm")
+        # For Helm apps, keep --values; do not add unsupported --helm flag
         for v in spec.helm_values:
             args.extend(["--values", v])
     return args

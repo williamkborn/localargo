@@ -37,12 +37,17 @@ def _precheck_cli(cmd: list[str]) -> None:
         check_cli_availability(cli_name)
 
 
+def _fmt_cmd(cmd: list[str]) -> str:
+    return " ".join(cmd)
+
+
 def run(cmd: list[str], *, timeout: int = 120) -> str:
     """Run a command and return stdout text.
 
     Raises ProcessError on non-zero exit.
     """
     _precheck_cli(cmd)
+    logger.info("$ %s", _fmt_cmd(cmd))
     try:
         cp = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as e:
@@ -56,7 +61,13 @@ def run(cmd: list[str], *, timeout: int = 120) -> str:
 
     if cp.returncode != 0:
         _log_failure(cp, cmd)
-        failure_msg = f"Command failed with exit code {cp.returncode}"
+        failure_msg = (
+            "Command failed"
+            f" (exit={cp.returncode})\n"
+            f"cmd: {_fmt_cmd(cmd)}\n"
+            f"stdout:\n{(cp.stdout or '').strip()}\n"
+            f"stderr:\n{(cp.stderr or '').strip()}"
+        )
         raise ProcessError(
             failure_msg,
             code=cp.returncode,
@@ -68,6 +79,7 @@ def run(cmd: list[str], *, timeout: int = 120) -> str:
 
 def run_json(cmd: list[str], *, timeout: int = 120) -> Any:
     """Run a command and parse stdout as JSON."""
+    logger.info("$ %s", _fmt_cmd(cmd))
     out = run(cmd, timeout=timeout)
     try:
         return json.loads(out)
@@ -83,6 +95,7 @@ def run_stream(cmd: list[str], *, bufsize: int = 1) -> Iterator[str]:
     will raise ProcessError at the end (after stream drains) with captured stderr.
     """
     _precheck_cli(cmd)
+    logger.info("$ %s", _fmt_cmd(cmd))
     proc = _popen_with_pipes(cmd, bufsize)
     stdout_iter = _get_stdout_iterator(proc)
     try:

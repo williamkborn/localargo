@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess as sp
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -36,6 +38,52 @@ def apply_manifests(files: list[str], *, kubeconfig: str | None = None) -> None:
         args.extend(["-f", f])
     logger.info("Applying manifests: %s", ", ".join(files))
     run_subprocess(args)
+
+
+def ensure_namespace(namespace: str) -> None:
+    """Create namespace if it does not exist."""
+    args = ["kubectl", "get", "ns", namespace, "-o", "name"]
+    result = run_subprocess(args, check=False)
+    if result.returncode != 0:
+        run_subprocess(["kubectl", "create", "ns", namespace])
+
+
+def upsert_secret(namespace: str, secret_name: str, data: dict[str, str]) -> None:
+    """Create or update a generic secret with provided key/value pairs.
+
+    Values are passed from environment; empty values are allowed and result in empty strings.
+    """
+    ensure_namespace(namespace)
+    # Try create
+    base = ["kubectl", "-n", namespace, "create", "secret", "generic", secret_name]
+    for k, v in data.items():
+        base.extend(["--from-literal", f"{k}={v}"])
+    create_result = run_subprocess(base, check=False)
+    if create_result.returncode == 0:
+        return
+
+    # Fallback to kubectl create secret generic --dry-run=client -o yaml | kubectl apply -f -
+    kubectl_path = shutil.which("kubectl")
+    if not kubectl_path:
+        msg = "kubectl not found"
+        raise FileNotFoundError(msg)
+    dry = [
+        kubectl_path,
+        "-n",
+        namespace,
+        "create",
+        "secret",
+        "generic",
+        secret_name,
+        "--dry-run=client",
+        "-o",
+        "yaml",
+    ]
+    for k, v in data.items():
+        dry.extend(["--from-literal", f"{k}={v}"])
+    # Pipe into apply using captured output for safer resource handling
+    dry_result = sp.run(dry, check=True, capture_output=True)
+    sp.run([kubectl_path, "apply", "-f", "-"], check=True, input=dry_result.stdout)
 
 
 if TYPE_CHECKING:  # imported only for type checking

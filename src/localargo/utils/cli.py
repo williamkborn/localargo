@@ -63,6 +63,35 @@ def ensure_kubectl_available() -> str:
     return kubectl_path
 
 
+def ensure_helm_available() -> str:
+    """Ensure helm CLI is available and return its path."""
+    path = check_cli_availability("helm", "helm not found")
+    if not path:
+        msg = "helm not found"
+        raise FileNotFoundError(msg)
+    return path
+
+
+def ensure_kind_available() -> str:
+    """Ensure kind CLI is available and return its path."""
+    path = check_cli_availability("kind", "kind not found")
+    if not path:
+        msg = "kind not found"
+        raise FileNotFoundError(msg)
+    return path
+
+
+def ensure_core_tools_available() -> None:
+    """Ensure kubectl, helm, argocd, and kind are available.
+
+    Raises FileNotFoundError if any are missing.
+    """
+    ensure_kubectl_available()
+    ensure_helm_available()
+    ensure_argocd_available()
+    ensure_kind_available()
+
+
 def build_kubectl_get_pods_cmd(
     kubectl_path: str, namespace: str, label_selector: str
 ) -> list[str]:
