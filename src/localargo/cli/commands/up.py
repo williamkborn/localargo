@@ -168,6 +168,9 @@ def up_cmd(manifest_path: str | None) -> None:
     ensure_core_tools_available()
     upm = load_up_manifest(manifest_file)
 
+    # Validate configuration before starting any operations
+    _validate_environment_variables(upm)
+
     _create_cluster(upm)
 
     # 2) Login to ArgoCD
