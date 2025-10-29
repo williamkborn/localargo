@@ -16,9 +16,7 @@ from localargo.core.argocd import ArgoClient, RepoAddOptions
 from localargo.core.k8s import apply_manifests, ensure_namespace, upsert_secret
 from localargo.logging import logger
 from localargo.providers.registry import get_provider
-from localargo.utils.cli import (
-    ensure_core_tools_available,
-)
+from localargo.utils.cli import ensure_core_tools_available
 from localargo.utils.proc import ProcessError
 
 
@@ -37,7 +35,23 @@ def validate_cmd(manifest_path: str | None) -> None:
     manifest_file = _default_manifest_path(manifest_path)
     ensure_core_tools_available()
     upm = load_up_manifest(manifest_file)
+    _validate_environment_variables(upm)
     _print_planned_steps(upm)
+
+
+def _validate_environment_variables(upm: UpManifest) -> None:
+    """Validate that all environment variables referenced in secrets exist."""
+    for sec in upm.secrets:
+        for v in sec.secret_value:
+            if v.from_env and v.from_env not in os.environ:
+                logger.error("❌ Validation failed: Missing environment variables:")
+                logger.error("   - %s.%s <- %s", sec.secret_name, sec.secret_key, v.from_env)
+                logger.error("")
+                logger.error(
+                    "Please set these environment variables before running 'localargo up'"
+                )
+                msg = "Environment variable validation failed"
+                raise click.ClickException(msg)
 
 
 def _print_planned_steps(upm: UpManifest) -> None:
