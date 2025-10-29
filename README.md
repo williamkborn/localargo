@@ -9,13 +9,14 @@ Localargo is a command-line tool that makes ArgoCD development workflows faster 
 
 ## Features
 
-- 🚀 **Cluster Management**: Set up and switch between local/remote Kubernetes clusters
+- 🚀 **Cluster Management**: Initialize, manage, and switch between Kubernetes clusters
 - 📦 **Application Management**: Create, sync, and manage ArgoCD applications
 - 🌐 **Port Forwarding**: Easily access services running in your applications
 - 🔐 **Secrets Management**: Create and manage secrets for local development
 - 🔄 **Sync Operations**: Sync applications with watch mode for continuous development
 - 📋 **Templates**: Quick-start applications from common templates
 - 🔍 **Debug Tools**: Comprehensive debugging and troubleshooting utilities
+- 📋 **Validation**: Validate configurations before deployment
 
 ## Quick Start
 
@@ -26,6 +27,9 @@ pip install localargo
 # Initialize a local cluster with ArgoCD (uses KinD by default)
 localargo cluster init
 
+# Bring up cluster, configure ArgoCD, apply secrets, deploy apps
+localargo up
+
 # Create an application from a template
 localargo template create my-app --repo https://github.com/myorg/myrepo
 
@@ -33,8 +37,54 @@ localargo template create my-app --repo https://github.com/myorg/myrepo
 localargo port-forward start my-service
 
 # Sync and watch for changes
-localargo sync my-app --watch
+localargo sync --app my-app --watch
 ```
+
+## Available Commands
+
+Localargo provides the following main commands:
+
+- **`cluster`**: Manage Kubernetes clusters for ArgoCD development
+  - `init`: Initialize a local cluster with ArgoCD
+  - `status`: Show cluster and ArgoCD status
+  - `list`: List available clusters
+  - `switch`: Switch Kubernetes contexts
+  - `delete`: Delete clusters
+  - `password`: Get ArgoCD admin password
+
+- **`up`**: Bring up cluster, configure ArgoCD, apply secrets, deploy apps
+
+- **`app`**: Manage ArgoCD applications
+  - `deploy`: Create/update and sync applications
+  - `sync`: Sync applications
+  - `status`: Show application status
+  - `logs`: Tail application logs
+  - `list`: List applications
+  - `delete`: Delete applications
+
+- **`sync`**: Sync ArgoCD applications or local directories (with watch mode)
+
+- **`template`**: Create ArgoCD applications from templates
+  - `create`: Create application from template
+  - `list-templates`: List available templates
+  - `show`: Show template details
+
+- **`port-forward`**: Manage port forwarding for applications
+  - `start`: Start port forwarding for a service
+  - `app`: Port forward all services in an application
+  - `list-forwards`: List active forwards
+  - `stop`: Stop port forwarding
+
+- **`secrets`**: Manage secrets for local development
+
+- **`debug`**: Debugging and troubleshooting tools
+  - `validate`: Validate application configuration
+  - `logs`: Show ArgoCD application logs
+  - `events`: Show Kubernetes events
+
+- **`validate`**: Validate manifest and show execution plan
+
+- **`down`**: Tear down cluster
 
 ## Table of Contents
 
@@ -114,4 +164,3 @@ hatch run docs:build
 ## License
 
 `localargo` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
-# Test comment for precommit hook
