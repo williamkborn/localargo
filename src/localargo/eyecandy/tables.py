@@ -1,4 +1,5 @@
 """Tables for app list/status with color-coded Health and Sync."""
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
 

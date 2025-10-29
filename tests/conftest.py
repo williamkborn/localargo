@@ -64,9 +64,28 @@ def mock_subprocess_run():
         if len(cmd) > 1 and cmd[1] == "--version":
             result.stdout = "k3s version v1.27.0+k3s1"
 
-    def _handle_kubectl(cmd, result):
+    def _handle_kubectl(cmd, result):  # Test helper, complexity acceptable
         if "cluster-info" in cmd:
             result.stdout = "Kubernetes control plane is running"
+            return
+        # Handle kubectl get secret commands
+        if "get" in cmd and "secret" in cmd:
+            # Extract secret name from command
+            secret_name = None
+            for i, arg in enumerate(cmd):
+                if arg == "secret" and i + 1 < len(cmd):
+                    secret_name = cmd[i + 1]
+                    break
+            # Special case for ArgoCD initial admin secret (needs base64 encoded password)
+            if secret_name == "argocd-initial-admin-secret":
+                import base64  # pylint: disable=import-outside-toplevel
+
+                # Return base64-encoded "admin" as the default password
+                result.stdout = base64.b64encode(b"admin").decode("utf-8")
+                return
+            # For other secrets, return the secret name in stdout to indicate it exists
+            if secret_name:
+                result.stdout = secret_name
             return
         # Return a small pod list for get pods -o json
         if "get" in cmd and "pods" in cmd and "-o" in cmd and "json" in cmd:

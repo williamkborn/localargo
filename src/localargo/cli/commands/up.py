@@ -1,4 +1,5 @@
 """Validate, up, and down commands for up-manifest flows."""
+# pylint: disable=duplicate-code
 
 from __future__ import annotations
 
@@ -13,7 +14,10 @@ from localargo.config.manifest import (
     load_up_manifest,
 )
 from localargo.core.argocd import ArgoClient, RepoAddOptions
+from localargo.core.checkers import check_argocd, check_cluster
+from localargo.core.execution import STANDARD_UP_STEPS, create_up_execution_engine
 from localargo.core.k8s import apply_manifests, ensure_namespace, upsert_secret
+from localargo.core.types import StepStatus
 from localargo.logging import logger
 from localargo.providers.registry import get_provider
 from localargo.utils.cli import ensure_core_tools_available
@@ -30,13 +34,18 @@ def _default_manifest_path(manifest: str | None) -> str:
 
 @click.command()
 @click.option("--manifest", "manifest_path", default=None, help="Path to localargo.yaml")
-def validate_cmd(manifest_path: str | None) -> None:
+@click.option("--status", is_flag=True, help="Check and display current status of all steps")
+def validate_cmd(manifest_path: str | None, status: bool) -> None:  # noqa: FBT001
     """Validate the manifest and print steps that would be executed."""
     manifest_file = _default_manifest_path(manifest_path)
     ensure_core_tools_available()
     upm = load_up_manifest(manifest_file)
     _validate_environment_variables(upm)
-    _print_planned_steps(upm)
+
+    if status:
+        _print_current_status(upm)
+    else:
+        _print_planned_steps(upm)
 
 
 def _validate_environment_variables(upm: UpManifest) -> None:
@@ -52,6 +61,117 @@ def _validate_environment_variables(upm: UpManifest) -> None:
                 )
                 msg = "Environment variable validation failed"
                 raise click.ClickException(msg)
+
+
+def _print_current_status(upm: UpManifest) -> None:
+    """Check and print the current status of all execution steps."""
+    logger.info("Checking current status of all steps...")
+
+    # We'll create the ArgoCD client lazily only when needed
+    client = None
+    client_available = False
+
+    step_number = 1
+    all_completed = True
+
+    for step in STANDARD_UP_STEPS:
+        client, client_available = _ensure_client_if_needed(
+            step, upm, client, client_available
+        )
+        step_completed = _check_and_print_step(
+            step, upm, client, client_available, step_number
+        )
+        if not step_completed:
+            all_completed = False
+        step_number += 1
+
+    _print_completion_message(all_completed)
+
+
+def _ensure_client_if_needed(
+    step: Any,
+    upm: UpManifest,
+    client: Any,
+    client_available: bool,  # noqa: FBT001
+) -> tuple[Any, bool]:
+    """Ensure ArgoCD client is initialized if step requires it."""
+    if step.requires_client and client is None:
+        client_available = _try_initialize_argocd_client(upm)
+        if client_available:
+            client = ArgoClient(namespace="argocd", insecure=True)
+    return client, client_available
+
+
+def _check_and_print_step(
+    step: Any,
+    upm: UpManifest,
+    client: Any,
+    client_available: bool,  # noqa: FBT001
+    step_number: int,
+) -> bool:
+    """Check a step and print its status, return True if completed."""
+    step_client = client if (step.requires_client and client_available) else None
+    status, checked = _check_step_status(step, upm, step_client, client_available)
+    _print_step_status(step_number, step, status)
+    return checked and status.is_completed
+
+
+def _try_initialize_argocd_client(upm: UpManifest) -> bool:
+    """Try to initialize ArgoCD client by checking dependencies."""
+    try:
+        cluster_status = check_cluster(upm, None)
+        if not cluster_status.is_completed:
+            return False
+
+        argocd_status = check_argocd(upm, None)
+    except (OSError, ValueError, RuntimeError):
+        return False
+    return argocd_status.is_completed
+
+
+def _check_step_status(
+    step: Any,
+    upm: UpManifest,
+    step_client: Any,
+    client_available: bool,  # noqa: FBT001
+) -> tuple[StepStatus, bool]:
+    """Check a step's status, returning (status, was_checked)."""
+    # Skip checking client-dependent steps if client isn't available
+    if step.requires_client and not client_available:
+        status = StepStatus(state="pending", reason="Cannot check (dependencies not ready)")
+        return status, False
+
+    try:
+        status = step.check(upm, step_client)
+    except (OSError, ValueError, RuntimeError) as e:
+        logger.warning("Failed to check status of %s: %s", step.name, e)
+        # Return a failed status
+        status = StepStatus(state="failed", reason=f"Check failed: {e!s}")
+        return status, False
+    return status, True
+
+
+def _print_completion_message(all_completed: bool) -> None:  # noqa: FBT001
+    """Print the appropriate completion message."""
+    if all_completed:
+        logger.info("\n✅ All steps are already completed!")
+    else:
+        logger.info("\n⚠️  Some steps need to be executed. Run 'localargo up' to proceed.")
+
+
+def _print_step_status(step_number: int, step: Any, status: Any) -> None:
+    """Print the status of a single step."""
+    if status.state == "completed":
+        logger.info("✅ %s) %s - %s", step_number, step.description, status.reason)
+    elif status.state == "skipped":
+        logger.info("⏭️  %s) %s - %s", step_number, step.description, status.reason)
+    else:
+        logger.info("⏳ %s) %s - %s", step_number, step.description, status.reason)
+
+
+def _print_step_error(step_number: int, step: Any, error: str) -> None:
+    """Print an error status for a step."""
+    logger.info("❌ %s) %s - Error checking status: %s", step_number, step.description, error)
 
 
 def _print_planned_steps(upm: UpManifest) -> None:
@@ -162,7 +282,10 @@ def _print_single_source_details(app: Any) -> None:
 
 @click.command()
 @click.option("--manifest", "manifest_path", default=None, help="Path to localargo.yaml")
-def up_cmd(manifest_path: str | None) -> None:
+@click.option(
+    "--force", is_flag=True, help="Force execution of all steps, bypassing state checks"
+)
+def up_cmd(manifest_path: str | None, *, force: bool) -> None:
     """Bring up cluster, configure ArgoCD, apply secrets, deploy apps."""
     manifest_file = _default_manifest_path(manifest_path)
     ensure_core_tools_available()
@@ -171,19 +294,28 @@ def up_cmd(manifest_path: str | None) -> None:
     # Validate configuration before starting any operations
     _validate_environment_variables(upm)
 
-    _create_cluster(upm)
+    # Create execution engine and run steps
+    engine = create_up_execution_engine()
 
-    # 2) Login to ArgoCD
-    client = ArgoClient(namespace="argocd", insecure=True)
+    # Execute all steps with state checking (unless force=True)
+    # The ArgoCD client will be created lazily when needed
+    engine.execute(upm, client=None, force=force)
 
-    # Apply secrets before configuring repo credentials so apps can pull needed values
-    _apply_secrets(upm)
+    # Report final status
+    summary = engine.get_status_summary()
+    total_steps = len(engine.steps)
+    completed = summary["completed"] + summary["skipped"]
 
-    _add_repo_creds(client, upm)
-
-    _deploy_apps(client, upm)
-
-    logger.info("✅ Up complete")
+    if summary["failed"] > 0:
+        msg = "❌ Up failed: %s of %s steps failed"
+        logger.error(msg, summary["failed"], total_steps)
+        raise click.ClickException(msg % (summary["failed"], total_steps))
+    if force:
+        logger.info(
+            "✅ Up complete: %s of %s steps executed (force mode)", completed, total_steps
+        )
+    else:
+        logger.info("✅ Up complete: %s of %s steps processed", completed, total_steps)
 
 
 def _create_cluster(upm: UpManifest) -> None:
