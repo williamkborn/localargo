@@ -10,7 +10,7 @@ import time
 import pytest
 from rich.console import Console
 
-from localargo.eyecandy.progress_steps import StepLogger
+from localargo.eyecandy.step_logger import StepLogger
 
 
 class TestStepLogger:

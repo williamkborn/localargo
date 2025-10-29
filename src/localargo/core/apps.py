@@ -11,7 +11,7 @@ import click
 from localargo.core.argocd import ArgoClient
 from localargo.core.catalog import AppSpec, load_catalog
 from localargo.core.k8s import apply_manifests, list_pods_for_app, stream_logs
-from localargo.eyecandy.progress_steps import StepLogger
+from localargo.eyecandy.step_logger import StepLogger
 from localargo.eyecandy.tables import AppTables
 from localargo.logging import logger
 from localargo.utils.proc import ProcessError

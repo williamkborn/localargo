@@ -259,15 +259,6 @@ clusters:
     nodes: 3  # Custom node configuration
 ```
 
-#### Manifest Validation
-
-You can validate a manifest file without applying it:
-
-```bash
-# This will check syntax and provider availability
-python -c "from localargo.config.manifest import validate_manifest; validate_manifest('clusters.yaml')"
-```
-
 Localargo currently works with your existing kubectl and argocd CLI configurations. Future versions may support additional configuration options.
 
 ## Prerequisites
