@@ -1,0 +1,8 @@
+cluster:
+  - name: examples
+    provider: kind
+
+apps:
+  - nginx:
+      namespace: nginx
+      app_file: app.yaml

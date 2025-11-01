@@ -1,0 +1,30 @@
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: nginx
+  tag: "1.25.5-alpine"  # pin to a stable tag
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: demo.localtest.me
+      paths:
+        - path: /
+          pathType: Prefix
