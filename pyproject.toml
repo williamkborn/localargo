@@ -83,6 +83,9 @@ exclude_lines = [
   "if TYPE_CHECKING:",
 ]
 
+[tool.pylint.main]
+max-line-length = 120
+
 [tool.pytest.ini_options]
 addopts = "-v --maxfail=1 --disable-warnings"
 testpaths = ["tests"]

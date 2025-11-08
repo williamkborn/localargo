@@ -35,11 +35,24 @@ def _default_manifest_path(manifest: str | None) -> str:
 @click.command()
 @click.option("--manifest", "manifest_path", default=None, help="Path to localargo.yaml")
 @click.option("--status", is_flag=True, help="Check and display current status of all steps")
-def validate_cmd(manifest_path: str | None, status: bool) -> None:  # noqa: FBT001
+@click.option(
+    "--exclude",
+    "excluded_apps",
+    multiple=True,
+    help="Exclude specific apps from validation. Can be used multiple times.",
+)
+def validate_cmd(
+    manifest_path: str | None, *, status: bool, excluded_apps: tuple[str, ...]
+) -> None:
     """Validate the manifest and print steps that would be executed."""
     manifest_file = _default_manifest_path(manifest_path)
     ensure_core_tools_available()
     upm = load_up_manifest(manifest_file)
+
+    # Handle excluded apps (don't remove from ArgoCD during validation)
+    if excluded_apps:
+        upm = _handle_excluded_apps(upm, excluded_apps, remove_from_argocd=False)
+
     _validate_environment_variables(upm)
 
     if status:
@@ -285,11 +298,24 @@ def _print_single_source_details(app: Any) -> None:
 @click.option(
     "--force", is_flag=True, help="Force execution of all steps, bypassing state checks"
 )
-def up_cmd(manifest_path: str | None, *, force: bool) -> None:
+@click.option(
+    "--exclude",
+    "excluded_apps",
+    multiple=True,
+    help=(
+        "Exclude specific apps from deployment. If already installed, they will be removed from ArgoCD. "
+        "Repeatable."
+    ),
+)
+def up_cmd(manifest_path: str | None, *, force: bool, excluded_apps: tuple[str, ...]) -> None:
     """Bring up cluster, configure ArgoCD, apply secrets, deploy apps."""
     manifest_file = _default_manifest_path(manifest_path)
     ensure_core_tools_available()
     upm = load_up_manifest(manifest_file)
+
+    # Handle excluded apps
+    if excluded_apps:
+        upm = _handle_excluded_apps(upm, excluded_apps)
 
     # Validate configuration before starting any operations
     _validate_environment_variables(upm)
@@ -316,6 +342,50 @@ def up_cmd(manifest_path: str | None, *, force: bool) -> None:
         )
     else:
         logger.info("✅ Up complete: %s of %s steps processed", completed, total_steps)
+
+
+def _handle_excluded_apps(
+    upm: UpManifest, excluded_apps: tuple[str, ...], *, remove_from_argocd: bool = True
+) -> UpManifest:
+    """Handle excluded apps by optionally removing them from ArgoCD and filtering from manifest."""
+    if not excluded_apps:
+        return upm
+
+    excluded_set = set(excluded_apps)
+
+    # Remove excluded apps from ArgoCD if requested
+    if remove_from_argocd:
+        _remove_excluded_apps_from_argocd(excluded_set)
+
+    # Filter apps from the manifest
+    filtered_apps = [app for app in upm.apps if app.name not in excluded_set]
+
+    logger.info("Excluded %d app(s): %s", len(excluded_apps), ", ".join(excluded_apps))
+
+    # Return new UpManifest with filtered apps
+    return UpManifest(
+        clusters=upm.clusters,
+        apps=filtered_apps,
+        repo_creds=upm.repo_creds,
+        secrets=upm.secrets,
+    )
+
+
+def _remove_excluded_apps_from_argocd(excluded_apps: set[str]) -> None:
+    """Remove excluded apps from ArgoCD if they exist."""
+    try:
+        client = ArgoClient(namespace="argocd", insecure=True)
+        installed_apps = client.get_apps()
+        installed_app_names = {app.name for app in installed_apps}
+
+        for app_name in excluded_apps:
+            if app_name in installed_app_names:
+                logger.info("Removing excluded app '%s' from ArgoCD...", app_name)
+                client.delete_app(app_name)
+                logger.info("✅ Removed app '%s' from ArgoCD", app_name)
+    except Exception as e:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+        logger.warning("Could not check/remove excluded apps from ArgoCD: %s", e)
+        logger.info("Continuing with app filtering from manifest...")
 
 
 def _create_cluster(upm: UpManifest) -> None:

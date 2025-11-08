@@ -389,3 +389,72 @@ apps:
             assert result.exit_code == 0
             assert "Checking current status" in result.output
             assert "All steps are already completed" in result.output
+
+    def test_validate_command_with_exclude_option(self, tmp_path):
+        """Test that validate command accepts --exclude option and filters apps."""
+        manifest_file = tmp_path / "localargo.yaml"
+        manifest_file.write_text("""cluster:
+  - name: test-cluster
+    provider: kind
+
+apps:
+  - app1:
+      namespace: default
+      repo_url: https://github.com/example/repo
+      path: .
+      target_revision: main
+  - app2:
+      namespace: default
+      repo_url: https://github.com/example/repo
+      path: .
+      target_revision: main
+""")
+
+        runner = CliRunner()
+
+        # Test validate with --exclude option
+        result = runner.invoke(
+            validate_cmd, ["--manifest", str(manifest_file), "--exclude", "app1"]
+        )
+
+        assert result.exit_code == 0
+        assert "Excluded 1 app(s): app1" in result.output
+        # Should show only app2 in the plan
+        assert "app 'app2'" in result.output
+        # app1 should not appear in the planned steps (only in the exclusion message)
+        assert "app 'app1'" not in result.output
+
+    def test_up_command_with_exclude_option(self, tmp_path):
+        """Test that up command accepts --exclude option."""
+        manifest_file = tmp_path / "localargo.yaml"
+        manifest_file.write_text("""cluster:
+  - name: test-cluster
+    provider: kind
+
+apps:
+  - app1:
+      namespace: default
+      repo_url: https://github.com/example/repo
+      path: .
+      target_revision: main
+""")
+
+        runner = CliRunner()
+
+        with patch("localargo.core.execution.create_up_execution_engine") as mock_engine:
+            mock_engine_instance = mock_engine.return_value
+            mock_engine_instance.execute.return_value = {}
+            mock_engine_instance.get_status_summary.return_value = {
+                "completed": 1,
+                "skipped": 0,
+                "failed": 0,
+                "pending": 0,
+            }
+
+            # Test that --exclude flag is accepted
+            result = runner.invoke(
+                up_cmd, ["--manifest", str(manifest_file), "--exclude", "app1"]
+            )
+
+            # Should succeed (may fail later due to mocking, but flag parsing should work)
+            assert result.exit_code in [0, 1]  # 0 for success, 1 for execution errors

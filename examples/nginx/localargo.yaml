@@ -3,6 +3,6 @@ cluster:
     provider: kind
 
 apps:
-  - nginx:
+  - demo-nginx:
       namespace: nginx
       app_file: app.yaml
